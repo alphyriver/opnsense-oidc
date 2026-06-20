@@ -1,0 +1,38 @@
+<model>
+    <mount>//OPNsense/oidc</mount>
+    <version>1.0.0</version>
+    <description>
+        OpenID Connect account links: a binding from a verified (issuer, subject)
+        federated identity to a local OPNsense user. Maintained by the plugin's
+        auth callback; not exposed in the UI. Storing the binding here (rather than
+        as custom fields on the user node) keeps it from being dropped when an
+        admin edits the user in the system user manager.
+    </description>
+    <items>
+        <links>
+            <link type="ArrayField">
+                <issuer type="TextField">
+                    <Required>Y</Required>
+                    <mask>/^.+$/u</mask>
+                    <ValidationMessage>An issuer is required.</ValidationMessage>
+                </issuer>
+                <subject type="TextField">
+                    <Required>Y</Required>
+                    <mask>/^.+$/u</mask>
+                    <ValidationMessage>A subject is required.</ValidationMessage>
+                </subject>
+                <username type="TextField">
+                    <Required>Y</Required>
+                    <mask>/^.+$/u</mask>
+                    <ValidationMessage>A username is required.</ValidationMessage>
+                </username>
+                <provider type="TextField">
+                    <mask>/^.*$/u</mask>
+                </provider>
+                <created type="TextField">
+                    <mask>/^[0-9]*$/</mask>
+                </created>
+            </link>
+        </links>
+    </items>
+</model>

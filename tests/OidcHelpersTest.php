@@ -106,4 +106,48 @@ final class OidcHelpersTest extends TestCase
         $this->assertStringNotContainsString('/', $evil);
         $this->assertStringNotContainsString('.', substr($evil, 5));
     }
+
+    /**
+     * @param array{bool,bool,bool,bool,bool} $facts ordered as the method args:
+     *   verified, haveBoundLink, boundUserExists, fallbackUserExists, fallbackBoundElsewhere
+     */
+    #[DataProvider('resolutionCases')]
+    public function testDecideAccountResolution(array $facts, string $expected): void
+    {
+        $this->assertSame($expected, OidcHelpers::decideAccountResolution(...$facts));
+    }
+
+    public static function resolutionCases(): array
+    {
+        return [
+            // A live verified binding always wins, even when a different account
+            // matches by username/email (the takeover case the binding defends).
+            'bound live account' =>
+                [[true, true, true, true, true], OidcHelpers::RESOLVE_USE_BOUND],
+            'bound live account, no fallback' =>
+                [[true, true, true, false, false], OidcHelpers::RESOLVE_USE_BOUND],
+
+            // Bound link whose account was deleted -> treat as unbound, fall back.
+            'stale bound link, fallback exists' =>
+                [[true, true, false, true, false], OidcHelpers::RESOLVE_USE_FALLBACK],
+            'stale bound link, no fallback -> create' =>
+                [[true, true, false, false, false], OidcHelpers::RESOLVE_CREATE],
+
+            // Unbound verified identity matching an account already owned by a
+            // different identity must be refused (account-takeover guard).
+            'unbound, fallback owned elsewhere -> deny' =>
+                [[true, false, false, true, true], OidcHelpers::RESOLVE_DENY_CONFLICT],
+            'unbound, fallback free -> use + link' =>
+                [[true, false, false, true, false], OidcHelpers::RESOLVE_USE_FALLBACK],
+            'unbound, no fallback -> create + link' =>
+                [[true, false, false, false, false], OidcHelpers::RESOLVE_CREATE],
+
+            // Without a verified identity we cannot bind; legacy username/email
+            // behavior, and the conflict guard does not apply (no identity to own).
+            'unverified, fallback exists' =>
+                [[false, false, false, true, true], OidcHelpers::RESOLVE_USE_FALLBACK],
+            'unverified, no fallback -> create' =>
+                [[false, false, false, false, false], OidcHelpers::RESOLVE_CREATE],
+        ];
+    }
 }

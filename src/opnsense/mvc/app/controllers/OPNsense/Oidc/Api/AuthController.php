@@ -10,6 +10,7 @@ use OPNsense\Base\ApiControllerBase;
 use OPNsense\Base\FieldTypes\ArrayField;
 use OPNsense\Core\Backend;
 use OPNsense\Core\Config;
+use OPNsense\Oidc\AccountLinks;
 use OPNsense\Oidc\OidcClient;
 use OPNsense\Oidc\OidcHelpers;
 use RuntimeException;
@@ -25,6 +26,9 @@ class AuthController extends ApiControllerBase
     const ICON_CACHE_DIR = '/var/cache/oidc-icons';
     const ICON_CACHE_TTL = 86400;   // 24h server-side freshness
     const ICON_FETCH_TIMEOUT = 3;   // seconds; bound login-page latency on a cold fetch
+
+    /** @var OidcClient|null last client used by authenticate(); holds the verified ID token */
+    protected $oidcClient = null;
 
     public function doAuth()
     {
@@ -235,29 +239,79 @@ class AuthController extends ApiControllerBase
             return "Unable to authenticate: " . $e->getMessage();
         }
 
-        // Lookup existing local user. Derive the username (with email-local-part
-        // fallback) BEFORE the lookup so an existing account is matched via the
-        // fallback, not only created (e.g. Microsoft Entra ID v2.0 UserInfo omits
-        // preferred_username).
+        // Resolve the local account. Prefer the verified (issuer, subject) binding
+        // from the ID token: it is the stable, IdP-asserted identity and cannot be
+        // displaced by a username/email collision. Fall back to username/email
+        // matching only for identities not yet bound. See
+        // OidcHelpers::decideAccountResolution() for the (pure, tested) branching.
+        $subject = '';
+        $issuer  = '';
+        try {
+            $subject = (string)($this->oidcClient->getVerifiedClaims('sub') ?? '');
+            $issuer  = (string)($this->oidcClient->getVerifiedClaims('iss') ?? '');
+        } catch (\Exception $e) {
+            // No verified ID token claims available; fall back to legacy matching.
+        }
+        $verified = ($subject !== '' && $issuer !== '');
+
+        $links         = new AccountLinks();
+        $boundUsername = $verified ? $links->findUsername($issuer, $subject) : null;
+        $boundUser     = $boundUsername !== null ? $this->findLocalUserByName($boundUsername) : false;
+
+        // Drop a stale binding whose account was deleted, so the identity can be
+        // re-provisioned below rather than failing forever.
+        if ($boundUsername !== null && $boundUser === false) {
+            if ($links->unlink($issuer, $subject)) {
+                $links->serializeToConfig();
+                Config::getInstance()->save();
+            }
+        }
+
+        // Username/email fallback facts (with email-local-part fallback, e.g.
+        // Microsoft Entra ID v2.0 UserInfo omits preferred_username).
         $claimValue     = $user->{$auth->oidcUsernameClaim} ?? null;
         $lookupEmail    = $user->email ?? null;
         $lookupUsername = OidcHelpers::deriveUsername(
             is_string($claimValue) ? $claimValue : null,
             is_string($lookupEmail) ? $lookupEmail : null
         );
-        $localUser = $this->findLocalUser($lookupUsername, $lookupEmail);
-        if ($localUser === false) {
-            if (!self::ALLOW_USER_CREATION || !$auth->oidcCreateUsers) {
-                $this->response->setStatusCode(403, "User not found");
-                return "No matching local account, and user creation disabled.";
-            }
+        $fallbackUser   = $this->findLocalUser($lookupUsername, $lookupEmail);
+        $fallbackBoundElsewhere = ($fallbackUser !== false && $verified)
+            ? $links->isUsernameBoundElsewhere((string)$fallbackUser->name, $issuer, $subject)
+            : false;
 
-            // Create the user if allowed
-            $localUser = $this->createLocalUser($lookupUsername, $lookupEmail, $user->name ?? '',  $auth->oidcDefaultGroups);
-            if ($localUser === false) {
-                $this->response->setStatusCode(500, "User creation failed");
-                return "Unable to create local account.";
-            }
+        $action = OidcHelpers::decideAccountResolution(
+            $verified,
+            $boundUsername !== null,
+            $boundUser !== false,
+            $fallbackUser !== false,
+            $fallbackBoundElsewhere
+        );
+
+        switch ($action) {
+            case OidcHelpers::RESOLVE_USE_BOUND:
+                $localUser = $boundUser;
+                break;
+            case OidcHelpers::RESOLVE_DENY_CONFLICT:
+                $this->response->setStatusCode(403, "Account conflict");
+                return "This local account is already linked to a different identity.";
+            case OidcHelpers::RESOLVE_USE_FALLBACK:
+                $localUser = $fallbackUser;
+                $this->bindIdentity($links, $issuer, $subject, (string)$localUser->name, $provider);
+                break;
+            case OidcHelpers::RESOLVE_CREATE:
+            default:
+                if (!self::ALLOW_USER_CREATION || !$auth->oidcCreateUsers) {
+                    $this->response->setStatusCode(403, "User not found");
+                    return "No matching local account, and user creation disabled.";
+                }
+                $localUser = $this->createLocalUser($lookupUsername, $lookupEmail, $user->name ?? '', $auth->oidcDefaultGroups);
+                if ($localUser === false) {
+                    $this->response->setStatusCode(500, "User creation failed");
+                    return "Unable to create local account.";
+                }
+                $this->bindIdentity($links, $issuer, $subject, (string)$localUser->name, $provider);
+                break;
         }
 
         // SECURITY NOTE (session fixation): ideally the session ID would be
@@ -296,6 +350,7 @@ class AuthController extends ApiControllerBase
     {
         /** @var OIDC $auth */
         $client = new OidcClient($auth, $this);
+        $this->oidcClient = $client;
         $client->addScope($auth->oidcScopes);
 
         if (!$client->authenticate())
@@ -322,6 +377,41 @@ class AuthController extends ApiControllerBase
         }
 
         return false;
+    }
+
+    /** Finds the local user with exactly this username (used for binding lookups). */
+    protected function findLocalUserByName(string $username)
+    {
+        if ($username === '') {
+            return false;
+        }
+        $cnf = Config::getInstance()->object();
+        if (empty($cnf->system) || empty($cnf->system->user)) {
+            return false;
+        }
+        foreach ($cnf->system->user as $user) {
+            if ((string)$user->name === $username) {
+                return $user;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Persist a verified (issuer, subject) -> username binding, but only when the
+     * identity is verified and the stored link actually changes — so a normal
+     * login of an already-bound account performs no config write (honors the
+     * write-only-on-change discipline).
+     */
+    protected function bindIdentity(AccountLinks $links, string $issuer, string $subject, string $username, string $provider): void
+    {
+        if ($issuer === '' || $subject === '') {
+            return;
+        }
+        if ($links->link($issuer, $subject, $username, $provider)) {
+            $links->serializeToConfig();
+            Config::getInstance()->save();
+        }
     }
 
 

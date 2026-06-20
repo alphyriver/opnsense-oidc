@@ -80,4 +80,51 @@ class OidcHelpers
     {
         return 'icon_' . sha1($provider);
     }
+
+    /** Log in as the live account bound to this (issuer, subject). */
+    public const RESOLVE_USE_BOUND = 'use_bound';
+    /** Refuse: the username/email match belongs to a different federated identity. */
+    public const RESOLVE_DENY_CONFLICT = 'deny_conflict';
+    /** Use the username/email match (and link it to this identity when verified). */
+    public const RESOLVE_USE_FALLBACK = 'use_fallback';
+    /** No match: create the account (and link it when verified). */
+    public const RESOLVE_CREATE = 'create';
+
+    /**
+     * Decide how to resolve an OIDC login to a local account. Pure so the
+     * security-critical branching is unit-testable in isolation from the config
+     * store and user database; the controller gathers the facts and applies the
+     * returned action (which account to use, and whether to persist a link).
+     *
+     * Precedence: a verified (issuer, subject) binding to a live account always
+     * wins — it is the IdP-asserted identity and cannot be displaced by a
+     * username/email collision. Only when there is no usable binding do we fall
+     * back to username/email matching, and then a verified identity must not
+     * attach to an account already owned by a different (issuer, subject).
+     *
+     * @param bool $verified              we have a non-empty, verified issuer+subject
+     * @param bool $haveBoundLink         a stored link exists for this (issuer, subject)
+     * @param bool $boundUserExists       the bound link's local account still exists
+     * @param bool $fallbackUserExists    username/email matched an existing local account
+     * @param bool $fallbackBoundElsewhere that matched account is bound to a different identity
+     * @return string one of the RESOLVE_* constants
+     */
+    public static function decideAccountResolution(
+        bool $verified,
+        bool $haveBoundLink,
+        bool $boundUserExists,
+        bool $fallbackUserExists,
+        bool $fallbackBoundElsewhere
+    ): string {
+        if ($verified && $haveBoundLink && $boundUserExists) {
+            return self::RESOLVE_USE_BOUND;
+        }
+        if ($fallbackUserExists) {
+            if ($verified && $fallbackBoundElsewhere) {
+                return self::RESOLVE_DENY_CONFLICT;
+            }
+            return self::RESOLVE_USE_FALLBACK;
+        }
+        return self::RESOLVE_CREATE;
+    }
 }
