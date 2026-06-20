@@ -95,4 +95,15 @@ final class OidcHelpersTest extends TestCase
             'not an ip'        => ['example.com', false],
         ];
     }
+
+    public function testIconCacheKeyIsStableAndFilesystemSafe(): void
+    {
+        $key = OidcHelpers::iconCacheKey('keycloak');
+        $this->assertSame('icon_' . sha1('keycloak'), $key);
+        // A malicious provider name must not produce path-traversal characters.
+        $evil = OidcHelpers::iconCacheKey('../../etc/passwd');
+        $this->assertMatchesRegularExpression('/^icon_[0-9a-f]{40}$/', $evil);
+        $this->assertStringNotContainsString('/', $evil);
+        $this->assertStringNotContainsString('.', substr($evil, 5));
+    }
 }

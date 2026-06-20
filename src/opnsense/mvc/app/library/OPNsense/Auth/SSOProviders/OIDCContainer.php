@@ -24,16 +24,39 @@ class OIDCContainer implements ISSOContainer
                 'login_uri' => "/api/oidc/auth/login?provider={$name}",
             ];
 
+            // Use the admin's custom button if set, otherwise a sane built-in
+            // default so multi-provider login pages look consistent without every
+            // admin hand-writing CSS. Fully overridable via the Custom Button field.
             $customButton = (string)$server->oidc_custom_button;
-            if (!empty($customButton)) {
-                $opts['html_content'] = $customButton;
-                $iconUrl = "/api/oidc/auth/icon?provider={$name}";
-                $opts['html_content'] = str_replace('%icon%', $iconUrl, $opts['html_content']);
-                $opts['html_content'] = str_replace('%name%', $name, $opts['html_content']);
-                $opts['html_content'] = str_replace('%url%', $opts['login_uri'], $opts['html_content']);
+            if ($customButton === '') {
+                $hasIcon = !empty((string)$server->oidc_icon_url);
+                $customButton = self::defaultButton($hasIcon);
             }
+
+            $iconUrl = "/api/oidc/auth/icon?provider={$name}";
+            $opts['html_content'] = strtr($customButton, [
+                '%icon%' => $iconUrl,
+                '%name%' => htmlspecialchars($name, ENT_QUOTES),
+                '%url%'  => $opts['login_uri'],
+            ]);
 
             yield new OIDC($opts);
         }
+    }
+
+    /**
+     * Built-in login button used when no Custom Button is configured. Full-width
+     * primary button with the provider icon (when set) on a white chip so colored
+     * logos stay visible. Overridable via the Custom Button setting.
+     */
+    private static function defaultButton(bool $hasIcon): string
+    {
+        $icon = $hasIcon
+            ? '<img src="%icon%" alt="" style="height:1.3em;width:1.3em;margin-right:8px;'
+                . 'background:#fff;border-radius:3px;padding:2px;vertical-align:middle;object-fit:contain;">'
+            : '';
+        return '<a href="%url%" class="btn btn-primary btn-block" '
+            . 'style="margin-top:10px;display:flex;align-items:center;justify-content:center;">'
+            . $icon . 'Login with %name%</a>';
     }
 }

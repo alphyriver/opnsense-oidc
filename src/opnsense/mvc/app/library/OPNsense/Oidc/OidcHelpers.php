@@ -71,4 +71,13 @@ class OidcHelpers
             FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
         ) === false;
     }
+
+    /**
+     * Filesystem-safe cache key for a provider's icon. A hash guarantees no path
+     * traversal regardless of the provider name's contents.
+     */
+    public static function iconCacheKey(string $provider): string
+    {
+        return 'icon_' . sha1($provider);
+    }
 }

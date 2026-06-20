@@ -22,6 +22,9 @@ class AuthController extends ApiControllerBase
 {
     const ALLOW_USER_CREATION = true;
     const SESSION_AUTH_PROVIDER = 'openid_connect_provider';
+    const ICON_CACHE_DIR = '/var/cache/oidc-icons';
+    const ICON_CACHE_TTL = 86400;   // 24h server-side freshness
+    const ICON_FETCH_TIMEOUT = 3;   // seconds; bound login-page latency on a cold fetch
 
     public function doAuth()
     {
@@ -55,13 +58,42 @@ class AuthController extends ApiControllerBase
             return "Invalid icon URL.";
         }
 
-        // This endpoint is unauthenticated (it serves the login page) and fetches
-        // an admin-configured URL. Harden the fetch against SSRF/DoS, since the
-        // cost of either on a firewall's own management plane is high:
-        //  - cap redirects and restrict (redirect) protocols to http/https,
-        //  - cap the response size to avoid a memory-pressure DoS,
-        //  - reject responses resolved from internal/reserved addresses, so a
-        //    configured https URL can't redirect to an internal target.
+        $cacheFile = self::ICON_CACHE_DIR . '/' . OidcHelpers::iconCacheKey($provider);
+
+        // Serve a fresh cached icon with no network round-trip, so the login page
+        // render isn't tied to a third-party host on every load.
+        $cached = $this->readIconCache($cacheFile, self::ICON_CACHE_TTL);
+        if ($cached !== null) {
+            return $this->emitIcon($cached['mime'], $cached['data']);
+        }
+
+        // Cold fetch with a short timeout to bound login-page latency. On failure,
+        // serve a stale cache if we have one, otherwise fail to no icon (the login
+        // button degrades to text) rather than blocking the page render.
+        $fetched = $this->fetchIcon($url);
+        if ($fetched === null) {
+            $stale = $this->readIconCache($cacheFile, PHP_INT_MAX);
+            if ($stale !== null) {
+                return $this->emitIcon($stale['mime'], $stale['data']);
+            }
+            $this->response->setStatusCode(404, "Not Found");
+            return "Unable to fetch icon.";
+        }
+
+        $this->writeIconCache($cacheFile, $fetched['mime'], $fetched['data']);
+        return $this->emitIcon($fetched['mime'], $fetched['data']);
+    }
+
+    /**
+     * Fetch an icon URL with SSRF/DoS hardening (admin-configured, unauthenticated
+     * endpoint, runs on a firewall). Returns ['mime','data'] or null on any failure.
+     *  - cap redirects and restrict (redirect) protocols to http/https,
+     *  - cap the response size to avoid a memory-pressure DoS,
+     *  - reject responses resolved from internal/reserved addresses, so a
+     *    configured https URL can't redirect to an internal target.
+     */
+    private function fetchIcon(string $url): ?array
+    {
         $maxBytes = 1024 * 1024; // 1 MB
         $buffer = '';
         $tooLarge = false;
@@ -71,7 +103,7 @@ class AuthController extends ApiControllerBase
         curl_setopt($ch, CURLOPT_MAXREDIRS, 3);
         curl_setopt($ch, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
         curl_setopt($ch, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+        curl_setopt($ch, CURLOPT_TIMEOUT, self::ICON_FETCH_TIMEOUT);
         curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $chunk) use (&$buffer, &$tooLarge, $maxBytes) {
             $buffer .= $chunk;
             if (strlen($buffer) > $maxBytes) {
@@ -81,30 +113,60 @@ class AuthController extends ApiControllerBase
             return strlen($chunk);
         });
         curl_exec($ch);
-        $curlErr = curl_error($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $mimeType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
         $finalIp = (string)curl_getinfo($ch, CURLINFO_PRIMARY_IP);
         curl_close($ch);
 
         if ($tooLarge) {
-            $this->response->setStatusCode(404, "Not Found");
-            return "Icon exceeds maximum allowed size.";
+            return null;
         }
-
         if ($finalIp !== '' && OidcHelpers::isBlockedAddress($finalIp)) {
-            $this->response->setStatusCode(404, "Not Found");
-            return "Icon URL resolves to a disallowed address.";
+            return null;
         }
-
         if ($buffer === '' || $httpCode !== 200) {
-            $this->response->setStatusCode(404, "Not Found");
-            return "Unable to fetch icon. " . ($curlErr ?: "HTTP $httpCode");
+            return null;
         }
+        return ['mime' => ($mimeType ?: 'application/octet-stream'), 'data' => $buffer];
+    }
 
-        $this->response->setHeader('Content-Type', $mimeType);
-        $this->response->setHeader('Cache-Control', 'public, max-age=31536000, immutable'); // cache for 1 year, aggressive
-        return $buffer;
+    /** Read a cached icon if present and newer than $ttl seconds, else null. */
+    private function readIconCache(string $cacheFile, int $ttl): ?array
+    {
+        if (!is_file($cacheFile) || (time() - (int)@filemtime($cacheFile)) >= $ttl) {
+            return null;
+        }
+        $raw = @file_get_contents($cacheFile);
+        if ($raw === false) {
+            return null;
+        }
+        $data = @unserialize($raw, ['allowed_classes' => false]);
+        if (!is_array($data) || !isset($data['mime'], $data['data'])) {
+            return null;
+        }
+        return $data;
+    }
+
+    /** Atomically write an icon to the cache (best-effort). */
+    private function writeIconCache(string $cacheFile, string $mime, string $data): void
+    {
+        if (!is_dir(self::ICON_CACHE_DIR)) {
+            @mkdir(self::ICON_CACHE_DIR, 0750, true);
+        }
+        $tmp = $cacheFile . '.' . getmypid() . '.tmp';
+        if (@file_put_contents($tmp, serialize(['mime' => $mime, 'data' => $data]), LOCK_EX) !== false) {
+            @rename($tmp, $cacheFile);
+        }
+    }
+
+    /** Emit an icon response with caching headers. */
+    private function emitIcon(string $mime, string $data): string
+    {
+        $this->response->setHeader('Content-Type', $mime);
+        // The server-side cache (ICON_CACHE_TTL) is the source of truth; allow a
+        // modest browser cache so icon changes still propagate within a day.
+        $this->response->setHeader('Cache-Control', 'public, max-age=86400');
+        return $data;
     }
 
     /**
