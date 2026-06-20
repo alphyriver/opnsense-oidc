@@ -1,0 +1,71 @@
+name: 📦 Build & Test
+
+# Runs on Forgejo only. Mirrors .github/workflows/build.yml. The job guards on
+# github.server_url so that on Forgejo (which also reads .github/workflows) only
+# this file runs, and on the GitHub mirror only the .github file runs — exactly
+# one pipeline per platform.
+#
+# Requires a Linux runner exposing the `ubuntu-latest` label with
+# nested virtualization (/dev/kvm) available to the job, since
+# vmactions/freebsd-vm boots a FreeBSD VM to run `make package`.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  PLUGIN_NAME: oidc
+  PLUGIN_CATEGORY: devel
+
+jobs:
+  test:
+    if: ${{ github.server_url != 'https://github.com' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer
+
+      - name: Install dev dependencies
+        run: composer install --no-interaction --no-progress
+
+      - name: Run unit tests
+        run: composer test
+
+  build:
+    if: ${{ github.server_url != 'https://github.com' }}
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout opnsense/plugins (build root)
+        run: git clone --depth 1 https://github.com/opnsense/plugins.git ${GITHUB_WORKSPACE}
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          path: ${{ env.PLUGIN_CATEGORY }}/${{ env.PLUGIN_NAME }}
+
+      - name: Build package in FreeBSD
+        uses: vmactions/freebsd-vm@v1
+        with:
+          envs: 'PLUGIN_NAME PLUGIN_CATEGORY'
+          usesh: true
+          release: "14.3"
+          prepare: |
+            pkg install -y git gmake
+          run: |
+            cd $PLUGIN_CATEGORY/$PLUGIN_NAME
+            make package
+
+      - name: Upload artifact
+        uses: christopherhx/gitea-upload-artifact@v4
+        with:
+          name: os-${{ env.PLUGIN_NAME }}
+          path: ${{ env.PLUGIN_CATEGORY }}/${{ env.PLUGIN_NAME }}/work/pkg/*.pkg

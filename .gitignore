@@ -1,2 +1,7 @@
 work/
 .vscode
+
+# Composer dev tooling (composer.lock is committed for reproducible CI)
+/vendor/
+.phpunit.cache/
+.phpunit.result.cache

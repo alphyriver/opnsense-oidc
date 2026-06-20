@@ -1,0 +1,20 @@
+{
+    "name": "homelab-cosmos/opnsense-oidc",
+    "description": "Development tooling for the OPNsense OIDC plugin. This file is NOT shipped in the built package (only Makefile, pkg-descr and src/ are packaged).",
+    "license": "BSD-2-Clause",
+    "type": "project",
+    "require-dev": {
+        "phpunit/phpunit": "^11"
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "OPNsense\\Oidc\\": "src/opnsense/mvc/app/library/OPNsense/Oidc/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit"
+    },
+    "config": {
+        "sort-packages": true
+    }
+}
