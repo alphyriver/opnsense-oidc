@@ -11,6 +11,7 @@ use OPNsense\Base\FieldTypes\ArrayField;
 use OPNsense\Core\Backend;
 use OPNsense\Core\Config;
 use OPNsense\Oidc\OidcClient;
+use OPNsense\Oidc\OidcHelpers;
 use RuntimeException;
 
 /**
@@ -46,25 +47,64 @@ class AuthController extends ApiControllerBase
             $this->response->setStatusCode(404, "Not Found");
             return "Invalid icon URL.";
         }
-        // Proxy the image using cURL
+
+        // Explicit scheme allowlist (defense in depth on top of FILTER_VALIDATE_URL).
+        $scheme = strtolower((string)parse_url($url, PHP_URL_SCHEME));
+        if (!in_array($scheme, ['http', 'https'], true)) {
+            $this->response->setStatusCode(404, "Not Found");
+            return "Invalid icon URL.";
+        }
+
+        // This endpoint is unauthenticated (it serves the login page) and fetches
+        // an admin-configured URL. Harden the fetch against SSRF/DoS, since the
+        // cost of either on a firewall's own management plane is high:
+        //  - cap redirects and restrict (redirect) protocols to http/https,
+        //  - cap the response size to avoid a memory-pressure DoS,
+        //  - reject responses resolved from internal/reserved addresses, so a
+        //    configured https URL can't redirect to an internal target.
+        $maxBytes = 1024 * 1024; // 1 MB
+        $buffer = '';
+        $tooLarge = false;
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+        curl_setopt($ch, CURLOPT_MAXREDIRS, 3);
+        curl_setopt($ch, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+        curl_setopt($ch, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
         curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-        $imageData = curl_exec($ch);
+        curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $chunk) use (&$buffer, &$tooLarge, $maxBytes) {
+            $buffer .= $chunk;
+            if (strlen($buffer) > $maxBytes) {
+                $tooLarge = true;
+                return 0; // abort the transfer
+            }
+            return strlen($chunk);
+        });
+        curl_exec($ch);
         $curlErr = curl_error($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $mimeType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+        $finalIp = (string)curl_getinfo($ch, CURLINFO_PRIMARY_IP);
         curl_close($ch);
 
-        if ($imageData === false || $httpCode !== 200) {
+        if ($tooLarge) {
+            $this->response->setStatusCode(404, "Not Found");
+            return "Icon exceeds maximum allowed size.";
+        }
+
+        if ($finalIp !== '' && OidcHelpers::isBlockedAddress($finalIp)) {
+            $this->response->setStatusCode(404, "Not Found");
+            return "Icon URL resolves to a disallowed address.";
+        }
+
+        if ($buffer === '' || $httpCode !== 200) {
             $this->response->setStatusCode(404, "Not Found");
             return "Unable to fetch icon. " . ($curlErr ?: "HTTP $httpCode");
         }
 
-        $mimeType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
         $this->response->setHeader('Content-Type', $mimeType);
         $this->response->setHeader('Cache-Control', 'public, max-age=31536000, immutable'); // cache for 1 year, aggressive
-        return $imageData;
+        return $buffer;
     }
 
     /**
@@ -133,9 +173,16 @@ class AuthController extends ApiControllerBase
             return "Unable to authenticate: " . $e->getMessage();
         }
 
-        // Lookup existing local user
-        $lookupUsername = $user->{$auth->oidcUsernameClaim} ?? null;
+        // Lookup existing local user. Derive the username (with email-local-part
+        // fallback) BEFORE the lookup so an existing account is matched via the
+        // fallback, not only created (e.g. Microsoft Entra ID v2.0 UserInfo omits
+        // preferred_username).
+        $claimValue     = $user->{$auth->oidcUsernameClaim} ?? null;
         $lookupEmail    = $user->email ?? null;
+        $lookupUsername = OidcHelpers::deriveUsername(
+            is_string($claimValue) ? $claimValue : null,
+            is_string($lookupEmail) ? $lookupEmail : null
+        );
         $localUser = $this->findLocalUser($lookupUsername, $lookupEmail);
         if ($localUser === false) {
             if (!self::ALLOW_USER_CREATION || !$auth->oidcCreateUsers) {
@@ -150,6 +197,16 @@ class AuthController extends ApiControllerBase
                 return "Unable to create local account.";
             }
         }
+
+        // SECURITY NOTE (session fixation): ideally the session ID would be
+        // regenerated here on privilege elevation. OPNsense's Session wrapper
+        // (OPNsense\Mvc\Session) exposes no regeneration API, and its
+        // read-then-abort / write-on-close lifecycle makes a safe in-plugin
+        // rotation fragile (cookie/id mismatch within one request). OPNsense
+        // core's own local-password login does not regenerate the session ID
+        // either, so this is a core-level gap that affects every auth backend,
+        // not something this plugin should work around in isolation. Tracked for
+        // an upstream fix to OPNsense\Mvc\Session rather than a fragile local hack.
 
         // Create the main login session and log the user in.
         $username = (string)$localUser->name;
@@ -225,7 +282,14 @@ class AuthController extends ApiControllerBase
         $user->email    = $email ?? '';
         $user->descr    = $displayName ?? $username;
         $user->comment  = "Created with OpenID Connect";
-        $user->password = 'DEADBEEF';
+        // "scrambled_password" is OPNsense's documented mechanism for accounts
+        // that exist for authorization but cannot authenticate locally (the same
+        // mechanism used for API-only / externally-authenticated users), so this
+        // user can only ever log in via OIDC. Generate a random local password
+        // too (instead of a shared constant) so that even if the scramble flag is
+        // ever cleared elsewhere, these accounts don't collapse to one known
+        // password. Do NOT leave this empty or remove the scramble flag.
+        $user->password = bin2hex(random_bytes(16));
         $user->scrambled_password = "1";
         $user->scope    = "user";
         $user->disabled = "0";

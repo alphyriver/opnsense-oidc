@@ -25,6 +25,16 @@ The field from the user payload that contains the username.
 ### Scopes
 Scopes to request form the OIDC Provider. For example, `openid`, `email`, `profile`.
 
+### Redirect URL
+The exact URL the provider redirects back to after authentication (your
+`https://<opnsense>/api/oidc/auth/callback`).
+
+> [!IMPORTANT]
+> Set this explicitly. If left blank, the redirect URL is derived from the
+> inbound `Host` header, which is client-supplied — only safe when the web
+> server validates `Host` and you are not behind a reverse proxy. Setting it
+> explicitly is the secure default and also fixes logins behind a reverse proxy.
+
 ### Automatic user creation
 When a user logins and does not have a matching user account in the local database, this will create a new user.  This is to be used in conjunction with `Default Groups`
 

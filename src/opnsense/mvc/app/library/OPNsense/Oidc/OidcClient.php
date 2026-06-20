@@ -74,7 +74,15 @@ class OidcClient extends OpenIDConnectClient
         $this->request = $controller->request;
         $this->response = $controller->response;
 
-        $this->setRedirectURL("{$this->request->getScheme()}://{$this->request->getHeader('HOST')}{$callback}");
+        // Prefer the admin-configured redirect URL. The Host-header-derived
+        // fallback is kept for backward compatibility, but the Host header is
+        // client-supplied: relying on it lets an attacker who can influence it
+        // (e.g. behind a misconfigured reverse proxy or catch-all vhost) steer
+        // the redirect_uri sent to the IdP. Setting the field explicitly closes
+        // that off; see the "Redirect URL" help text in OIDC.php.
+        $redirectUrl = $auth->oidcRedirectUrl
+            ?: "{$this->request->getScheme()}://{$this->request->getHeader('HOST')}{$callback}";
+        $this->setRedirectURL($redirectUrl);
     }
 
     /**

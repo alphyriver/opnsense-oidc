@@ -29,4 +29,46 @@ class OidcHelpers
         }
         return $providerUrl;
     }
+
+    /**
+     * Derive the local username from the configured username claim, falling back
+     * to the local-part of the email when the claim is empty/absent (e.g.
+     * Microsoft Entra ID v2.0 UserInfo omits preferred_username).
+     *
+     * Computing this before the local-user lookup means an existing account is
+     * matched via the fallback, not only created. Returns null when neither
+     * input yields a usable value.
+     */
+    public static function deriveUsername(?string $claimValue, ?string $email): ?string
+    {
+        if (!empty($claimValue)) {
+            return $claimValue;
+        }
+        if (!empty($email) && strpos($email, '@') !== false) {
+            $local = strstr($email, '@', true);
+            return ($local !== false && $local !== '') ? $local : null;
+        }
+        return null;
+    }
+
+    /**
+     * True if the given address is a literal IP that an icon proxy running on a
+     * firewall should refuse to fetch from: loopback, link-local, RFC1918/ULA
+     * and other reserved ranges. Used to reject SSRF targets after cURL has
+     * resolved redirects. Non-IP input returns false (hostnames are checked by
+     * their resolved IP via CURLINFO_PRIMARY_IP).
+     */
+    public static function isBlockedAddress(string $ip): bool
+    {
+        if (filter_var($ip, FILTER_VALIDATE_IP) === false) {
+            return false;
+        }
+        // A valid IP that fails validation with the no-private/no-reserved flags
+        // is, by definition, in a private or reserved range — block it.
+        return filter_var(
+            $ip,
+            FILTER_VALIDATE_IP,
+            FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
+        ) === false;
+    }
 }

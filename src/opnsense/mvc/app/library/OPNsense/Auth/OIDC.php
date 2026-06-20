@@ -48,9 +48,7 @@ class OIDC extends Local implements IAuthConnector
         'profile',
     ];
 
-    public $oidcAuthorizationEndpoint = null;
-    public $oidcTokenEndpoint = null;
-    public $oidcUserInfoEndpoint = null;
+    public $oidcRedirectUrl = null;
 
     public $oidcCustomButton = null;
     public $oidcIconUrl = null;
@@ -85,9 +83,7 @@ class OIDC extends Local implements IAuthConnector
             'oidc_client_id' => 'oidcClientId',
             'oidc_client_secret' => 'oidcClientSecret',
             'oidc_custom_button' => 'oidcCustomButton',
-            'oidc_authorization_endpoint' => 'oidcAuthorizationEndpoint',
-            'oidc_token_endpoint' => 'oidcTokenEndpoint',
-            'oidc_userinfo_endpoint' => 'oidcUserInfoEndpoint',
+            'oidc_redirect_url' => 'oidcRedirectUrl',
             'oidc_icon_url' => 'oidcIconUrl',
             'oidc_create_users' => 'oidcCreateUsers',
             'oidc_username_claim' => 'oidcUsernameClaim',
@@ -160,6 +156,17 @@ class OIDC extends Local implements IAuthConnector
                 'help' => gettext("Group(s) to add by default when creating users"),
                 'type' => 'text',
                 'default' => join(',', $this->oidcDefaultGroups)
+            ],
+            'oidc_redirect_url' => [
+                'name' => gettext('Redirect URL'),
+                'help' => gettext(
+                    'The exact URL the provider redirects back to after authentication. ' .
+                    'Leave blank to derive it from the inbound Host header — only safe when the web ' .
+                    'server validates the Host header and you are not behind a reverse proxy. ' .
+                    'Setting it explicitly is the recommended, secure default.'
+                ) . ' ' . $callbackURL,
+                'type' => 'text',
+                'validate' => fn($value) => empty($value) || filter_var($value, FILTER_VALIDATE_URL) ? [] : [gettext('Redirect URL needs a valid URL.')],
             ],
 
             // Decorative
