@@ -31,6 +31,9 @@ jobs:
           php-version: '8.3'
           tools: composer
 
+      - name: Lint PHP sources
+        run: find src -name '*.php' -print0 | xargs -0 -n1 -P4 php -l
+
       - name: Install dev dependencies
         run: composer install --no-interaction --no-progress
 

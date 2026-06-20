@@ -48,13 +48,39 @@ cover them in `tests/`. The CI `test` job runs on every PR.
 
 ## CI
 
-Two functionally identical workflows build the FreeBSD package and run the unit
-tests:
+CI is split by platform capability:
 
-- `.forgejo/workflows/build.yml` — runs on Forgejo
-- `.github/workflows/build.yml` — runs on the GitHub mirror
+- `.forgejo/workflows/build.yml` (Forgejo) — **PHP lint + unit tests** only.
+- `.github/workflows/build.yml` (GitHub mirror) — lint + unit tests **and** the
+  authoritative **FreeBSD `make package` build + artifact**.
 
-Each job is guarded on `github.server_url` so the pipeline runs **exactly once
-per platform** (Forgejo also reads `.github/workflows`, hence the guard). The
-package build boots a FreeBSD 14.3 VM via `vmactions/freebsd-vm`, which needs
-nested virtualization (`/dev/kvm`) on the runner.
+Every job is guarded on `github.server_url` so the pipeline runs **exactly once
+per platform** (Forgejo also reads `.github/workflows`, hence the guard).
+
+Why the split: the package build boots a FreeBSD 14.3 VM via
+`vmactions/freebsd-vm`, which needs `sudo` + `qemu` + `/dev/kvm` in a privileged
+container. GitHub's hosted `ubuntu-latest` runners provide this; the stock
+Forgejo `act_runner` (jobs in an unprivileged `node:*` container) does not, so
+the build is done on the mirror side.
+
+Also note: Forgejo resolves `uses:` from `code.forgejo.org` by default (only
+`actions/*` is mirrored there), so GitHub-hosted actions are referenced by full
+`https://github.com/...` URL in the `.forgejo` file; the `.github` file uses the
+short `owner/repo@ref` form GitHub requires.
+
+### Enabling FreeBSD builds on Forgejo (optional, later)
+
+To build the package on Forgejo too, register a **dedicated KVM-capable runner**:
+
+1. Host with (nested) virtualization — `/dev/kvm` present.
+2. `act_runner` config running the build job privileged with KVM, e.g. in
+   `config.yaml`:
+   ```yaml
+   container:
+     privileged: true
+     options: --device /dev/kvm
+   ```
+   and a runner image that has `sudo` + `qemu` (or install them in a `prepare`
+   step), labelled distinctly (e.g. `freebsd-builder`).
+3. Re-add a `build` job to `.forgejo/workflows/build.yml` mirroring the
+   `.github` build job, with `runs-on: freebsd-builder`.

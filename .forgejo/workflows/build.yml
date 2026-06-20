@@ -1,29 +1,26 @@
-name: 📦 Build & Test
+name: 🧪 Lint & Test
 
-# Runs on Forgejo only. Mirrors .github/workflows/build.yml. The job guards on
-# github.server_url so that on Forgejo (which also reads .github/workflows) only
-# this file runs, and on the GitHub mirror only the .github file runs — exactly
-# one pipeline per platform.
+# Forgejo pipeline: fast PHP lint + unit tests. The FreeBSD package build lives
+# only in .github/workflows/build.yml, because booting a FreeBSD VM
+# (vmactions/freebsd-vm) needs sudo + qemu + /dev/kvm in a privileged container,
+# which the stock node-container act_runner does not provide. GitHub's hosted
+# ubuntu-latest runners do, so the authoritative package + artifact is built on
+# the mirror. See CONTRIBUTING.md ("Enabling FreeBSD builds on Forgejo") to move
+# the build here later on a dedicated KVM-capable runner.
 #
-# Requires a Linux runner exposing the `ubuntu-latest` label with
-# nested virtualization (/dev/kvm) available to the job, since
-# vmactions/freebsd-vm boots a FreeBSD VM to run `make package`.
+# The job is guarded on github.server_url so that on Forgejo (which also reads
+# .github/workflows) only this file runs, and on the GitHub mirror only the
+# .github file runs — exactly one test run per platform.
 #
 # NOTE: Forgejo resolves `uses:` from code.forgejo.org by default, where only
-# the `actions/*` set is mirrored. GitHub-hosted actions (setup-php, freebsd-vm,
-# gitea-upload-artifact) must therefore be referenced by full https://github.com
-# URL here. The .github twin keeps the short `owner/repo@ref` form, which GitHub
-# requires and Forgejo's full-URL form would reject.
+# the `actions/*` set is mirrored. GitHub-hosted actions (setup-php) must be
+# referenced by full https://github.com URL here.
 
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
-
-env:
-  PLUGIN_NAME: oidc
-  PLUGIN_CATEGORY: devel
 
 jobs:
   test:
@@ -39,39 +36,11 @@ jobs:
           php-version: '8.3'
           tools: composer
 
+      - name: Lint PHP sources
+        run: find src -name '*.php' -print0 | xargs -0 -n1 -P4 php -l
+
       - name: Install dev dependencies
         run: composer install --no-interaction --no-progress
 
       - name: Run unit tests
         run: composer test
-
-  build:
-    if: ${{ github.server_url != 'https://github.com' }}
-    runs-on: ubuntu-latest
-    needs: test
-    steps:
-      - name: Checkout opnsense/plugins (build root)
-        run: git clone --depth 1 https://github.com/opnsense/plugins.git ${GITHUB_WORKSPACE}
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          path: ${{ env.PLUGIN_CATEGORY }}/${{ env.PLUGIN_NAME }}
-
-      - name: Build package in FreeBSD
-        uses: https://github.com/vmactions/freebsd-vm@v1
-        with:
-          envs: 'PLUGIN_NAME PLUGIN_CATEGORY'
-          usesh: true
-          release: "14.3"
-          prepare: |
-            pkg install -y git gmake
-          run: |
-            cd $PLUGIN_CATEGORY/$PLUGIN_NAME
-            make package
-
-      - name: Upload artifact
-        uses: https://github.com/christopherhx/gitea-upload-artifact@v4
-        with:
-          name: os-${{ env.PLUGIN_NAME }}
-          path: ${{ env.PLUGIN_CATEGORY }}/${{ env.PLUGIN_NAME }}/work/pkg/*.pkg
