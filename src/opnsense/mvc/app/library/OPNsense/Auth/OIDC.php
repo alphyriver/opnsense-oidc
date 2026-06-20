@@ -41,6 +41,7 @@ class OIDC extends Local implements IAuthConnector
     public $oidcClientSecret = null;
     public $oidcCreateUsers = false;
     public $oidcUsernameClaim = 'preferred_username';
+    public $oidcGroupClaim = null;
     public $oidcDefaultGroups = [];
     public $oidcScopes = [
         'openid',
@@ -87,6 +88,7 @@ class OIDC extends Local implements IAuthConnector
             'oidc_icon_url' => 'oidcIconUrl',
             'oidc_create_users' => 'oidcCreateUsers',
             'oidc_username_claim' => 'oidcUsernameClaim',
+            'oidc_group_claim' => 'oidcGroupClaim',
         ];
 
         // >> map properties 1-on-1
@@ -156,6 +158,18 @@ class OIDC extends Local implements IAuthConnector
                 'help' => gettext("Group(s) to add by default when creating users"),
                 'type' => 'text',
                 'default' => join(',', $this->oidcDefaultGroups)
+            ],
+            'oidc_group_claim' => [
+                'name' => gettext('Group claim'),
+                'help' => gettext(
+                    'Claim holding the user\'s group names (e.g. <code>groups</code>). When set, the ' .
+                    'user\'s OPNsense group membership is reconciled to match this claim on every login: ' .
+                    'groups named in the claim that exist locally are added, and groups not in the claim ' .
+                    '(other than the Default groups above) are removed — the provider is authoritative. ' .
+                    'Leave blank to disable group synchronization. Group names are matched case-insensitively.'
+                ),
+                'type' => 'text',
+                'validate' => fn($value) => [],
             ],
             'oidc_redirect_url' => [
                 'name' => gettext('Redirect URL'),

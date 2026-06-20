@@ -314,6 +314,27 @@ class AuthController extends ApiControllerBase
                 break;
         }
 
+        // Live group synchronization (opt-in). When a group claim is configured the
+        // provider is authoritative over the user's group membership: reconcile it
+        // to the claim (plus the configured default groups) on every login. Disabled
+        // when the field is blank, preserving the create-time-only group behavior.
+        $groupClaim = (string)$auth->oidcGroupClaim;
+        if ($groupClaim !== '') {
+            $claimValue = $user->{$groupClaim} ?? null;
+            if ($claimValue === null) {
+                try {
+                    $claimValue = $this->oidcClient->getVerifiedClaims($groupClaim);
+                } catch (\Exception $e) {
+                    $claimValue = null;
+                }
+            }
+            $this->syncUserGroups(
+                $localUser,
+                OidcHelpers::normalizeGroupClaim($claimValue),
+                $auth->oidcDefaultGroups
+            );
+        }
+
         // SECURITY NOTE (session fixation): ideally the session ID would be
         // regenerated here on privilege elevation. OPNsense's Session wrapper
         // (OPNsense\Mvc\Session) exposes no regeneration API, and its
@@ -412,6 +433,88 @@ class AuthController extends ApiControllerBase
             $links->serializeToConfig();
             Config::getInstance()->save();
         }
+    }
+
+    /**
+     * Reconcile a user's local group membership to the provider-asserted groups
+     * (plus configured defaults). Writes config only when membership actually
+     * changes, so a login that matches the current state is a no-op (honors the
+     * write-only-on-change discipline). Only existing local groups are ever
+     * granted; the claim cannot create groups.
+     */
+    protected function syncUserGroups($localUser, array $claimGroups, array $defaultGroups): void
+    {
+        $cnf = Config::getInstance()->object();
+        if (empty($cnf->system) || empty($cnf->system->group)) {
+            return;
+        }
+
+        // Resolve the uid (a freshly created user model may not expose it yet;
+        // fall back to a name lookup against the reloaded config).
+        $uid   = (string)$localUser->uid;
+        $uname = (string)$localUser->name;
+        if ($uid === '' && $uname !== '') {
+            $byName = $this->findLocalUserByName($uname);
+            if ($byName !== false) {
+                $uid = (string)$byName->uid;
+            }
+        }
+        if ($uid === '') {
+            return;
+        }
+
+        $existing = [];
+        $current  = [];
+        foreach ($cnf->system->group as $group) {
+            $gname      = (string)$group->name;
+            $existing[] = $gname;
+            if (in_array($uid, $this->groupMembers($group), true)) {
+                $current[] = $gname;
+            }
+        }
+
+        $plan = OidcHelpers::reconcileGroups($claimGroups, $defaultGroups, $existing, $current);
+        if (empty($plan['add']) && empty($plan['remove'])) {
+            return;
+        }
+
+        $addLower    = array_map('strtolower', $plan['add']);
+        $removeLower = array_map('strtolower', $plan['remove']);
+        foreach ($cnf->system->group as $group) {
+            $glower   = strtolower((string)$group->name);
+            $inAdd    = in_array($glower, $addLower, true);
+            $inRemove = in_array($glower, $removeLower, true);
+            if (!$inAdd && !$inRemove) {
+                continue;
+            }
+            $members = $this->groupMembers($group);
+            if ($inAdd) {
+                if (!in_array($uid, $members, true)) {
+                    $members[] = $uid;
+                }
+            } else {
+                $members = array_values(array_filter($members, fn($m) => $m !== $uid));
+            }
+            // Rewrite as a single comma-joined <member> element, matching the
+            // format OPNsense stores group memberships in.
+            unset($group->member);
+            if (!empty($members)) {
+                $group->addChild('member', implode(',', $members));
+            }
+        }
+
+        Config::getInstance()->save();
+        (new Backend())->configdpRun('auth user changed', [$uname]);
+    }
+
+    /** Flatten a group's member element(s) into a list of uid strings. */
+    private function groupMembers($group): array
+    {
+        $members = [];
+        foreach ($group->member as $member) {
+            $members = array_merge($members, array_filter(explode(',', (string)$member)));
+        }
+        return $members;
     }
 
 

@@ -150,4 +150,79 @@ final class OidcHelpersTest extends TestCase
                 [[false, false, false, false, false], OidcHelpers::RESOLVE_CREATE],
         ];
     }
+
+    #[DataProvider('groupClaimCases')]
+    public function testNormalizeGroupClaim($value, array $expected): void
+    {
+        $this->assertSame($expected, OidcHelpers::normalizeGroupClaim($value));
+    }
+
+    public static function groupClaimCases(): array
+    {
+        return [
+            'json array'        => [['admins', 'users'], ['admins', 'users']],
+            'comma string'      => ['admins,users', ['admins', 'users']],
+            'space string'      => ['admins users', ['admins', 'users']],
+            'mixed whitespace'  => ["admins,  users\tops", ['admins', 'users', 'ops']],
+            'trims and drops'   => [[' admins ', '', 'users'], ['admins', 'users']],
+            'nested dropped'    => [['admins', ['x'], 'users'], ['admins', 'users']],
+            'null'              => [null, []],
+            'empty string'      => ['', []],
+            'scalar int'        => [42, ['42']],
+        ];
+    }
+
+    /**
+     * @param array{0:string[],1:string[],2:string[],3:string[]} $args
+     *   claimGroups, defaultGroups, existingGroups, currentGroups
+     */
+    #[DataProvider('reconcileCases')]
+    public function testReconcileGroups(array $args, array $expectedAdd, array $expectedRemove): void
+    {
+        $plan = OidcHelpers::reconcileGroups(...$args);
+        // Order is not contractual; compare as sets.
+        sort($plan['add']);
+        sort($plan['remove']);
+        sort($expectedAdd);
+        sort($expectedRemove);
+        $this->assertSame($expectedAdd, $plan['add'], 'add set');
+        $this->assertSame($expectedRemove, $plan['remove'], 'remove set');
+    }
+
+    public static function reconcileCases(): array
+    {
+        return [
+            // Add the claimed group, remove the one no longer claimed.
+            'add and remove' => [
+                [['admins'], [], ['admins', 'users', 'ops'], ['users']],
+                ['admins'], ['users'],
+            ],
+            // Default groups are part of "desired" and are never removed.
+            'default kept' => [
+                [[], ['users'], ['admins', 'users'], ['users']],
+                [], [],
+            ],
+            // A claim naming a nonexistent group cannot grant membership.
+            'nonexistent claim ignored' => [
+                [['nope'], [], ['admins', 'users'], ['users']],
+                [], ['users'],
+            ],
+            // Case-insensitive matching against canonical local casing.
+            'case insensitive' => [
+                [['ADMINS'], [], ['admins', 'users'], []],
+                ['admins'], [],
+            ],
+            // Already correct -> no changes (the no-op / no-write path).
+            'no change' => [
+                [['admins', 'users'], [], ['admins', 'users'], ['admins', 'users']],
+                [], [],
+            ],
+            // Empty claim with no defaults strips all current memberships
+            // (authoritative provider with the user in no claimed groups).
+            'empty claim strips' => [
+                [[], [], ['admins', 'users'], ['admins', 'users']],
+                [], ['admins', 'users'],
+            ],
+        ];
+    }
 }

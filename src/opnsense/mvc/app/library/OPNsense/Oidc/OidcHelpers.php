@@ -127,4 +127,96 @@ class OidcHelpers
         }
         return self::RESOLVE_CREATE;
     }
+
+    /**
+     * Normalize a group claim value into a flat list of non-empty group names.
+     * IdPs send groups either as a JSON array or as a single delimited string
+     * (space- or comma-separated, e.g. SAML-style or a scope-like string), so
+     * accept both. Non-string scalars are stringified; anything else is dropped.
+     *
+     * @param mixed $value the raw claim value from the token/userinfo
+     * @return string[] trimmed, non-empty group names (order preserved, as-sent)
+     */
+    public static function normalizeGroupClaim($value): array
+    {
+        if ($value === null) {
+            return [];
+        }
+        $items = is_array($value) ? $value : preg_split('/[,\s]+/', (string)$value);
+        $groups = [];
+        foreach ($items as $item) {
+            if (is_array($item) || is_object($item)) {
+                continue;
+            }
+            $name = trim((string)$item);
+            if ($name !== '') {
+                $groups[] = $name;
+            }
+        }
+        return $groups;
+    }
+
+    /**
+     * Compute the group-membership changes for a user when the provider is
+     * authoritative over groups. Pure so the reconcile logic is unit-testable
+     * apart from the OPNsense config store.
+     *
+     * Desired membership = local groups whose name matches a claim group OR a
+     * configured default group (matched case-insensitively). The user is added to
+     * desired groups they lack and removed from any other group they are in
+     * (default groups are part of "desired" and so are never removed). Only
+     * groups that actually exist locally are ever granted; the claim cannot
+     * conjure new groups.
+     *
+     * @param string[] $claimGroups    group names asserted by the provider
+     * @param string[] $defaultGroups  admin-configured default groups (always kept)
+     * @param string[] $existingGroups all local group names (canonical casing)
+     * @param string[] $currentGroups  the user's current local group names
+     * @return array{add: string[], remove: string[]} canonical group names to add / remove
+     */
+    public static function reconcileGroups(
+        array $claimGroups,
+        array $defaultGroups,
+        array $existingGroups,
+        array $currentGroups
+    ): array {
+        // Map lowercased name -> canonical local name (existing groups only).
+        $canonical = [];
+        foreach ($existingGroups as $name) {
+            $name = (string)$name;
+            if ($name !== '') {
+                $canonical[strtolower($name)] = $name;
+            }
+        }
+
+        // Desired lowercased keys = (claim ∪ defaults) restricted to existing groups.
+        $desired = [];
+        foreach (array_merge($claimGroups, $defaultGroups) as $name) {
+            $key = strtolower(trim((string)$name));
+            if ($key !== '' && isset($canonical[$key])) {
+                $desired[$key] = $canonical[$key];
+            }
+        }
+
+        $currentKeys = [];
+        foreach ($currentGroups as $name) {
+            $currentKeys[strtolower((string)$name)] = (string)$name;
+        }
+
+        $add = [];
+        foreach ($desired as $key => $name) {
+            if (!isset($currentKeys[$key])) {
+                $add[] = $name;
+            }
+        }
+
+        $remove = [];
+        foreach ($currentKeys as $key => $name) {
+            if (!isset($desired[$key])) {
+                $remove[] = $name;
+            }
+        }
+
+        return ['add' => $add, 'remove' => $remove];
+    }
 }
