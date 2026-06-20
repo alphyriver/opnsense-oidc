@@ -25,6 +25,30 @@ The OPNsense package build (`make package`, via `Mk/plugins.mk`) only copies
 (`composer.json`, `phpunit.xml`, `tests/`, CI workflows, this file) is
 **development tooling and is never installed on the firewall.**
 
+## Vendored OIDC library
+
+The OIDC protocol client is the third-party
+[`jakub-onderka/openid-connect-php`](https://github.com/JakubOnderka/OpenID-Connect-PHP),
+vendored under `src/.../OPNsense/Oidc/lib/` because OPNsense's plugin build has
+no Composer-fetch step. It depends only on `phpseclib`, which OPNsense already
+ships as a system port at `/usr/local/share/phpseclib` (so phpseclib is **not**
+vendored). `OidcClient.php` registers the phpseclib autoloaders before requiring
+`lib/` (one of the files composes a phpseclib trait at load time).
+
+**Do not hand-edit the files in `lib/`.** They must stay byte-identical to
+upstream so their checksums in `/vendor-lock.json` verify. To update:
+
+```sh
+sh scripts/vendor-update.sh   # bumps to the latest upstream release if newer
+```
+
+CI runs this weekly (`.forgejo/workflows/vendor-update.yml`) and opens a PR when
+upstream moves; a human reviews and merges. The job needs a token with repo + PR
+write — set the `VENDOR_UPDATE_TOKEN` secret if the automatic job token can't
+create PRs. If a new upstream release adds or renames files, the
+`require_once` list in `OidcClient.php` may need a manual follow-up (PR CI lint
+will flag it).
+
 ## Running the tests
 
 Pure-logic code with no OPNsense/Phalcon runtime dependency lives in

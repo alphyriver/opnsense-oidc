@@ -1,0 +1,13 @@
+{
+  "package": "jakub-onderka/openid-connect-php",
+  "repository": "https://github.com/JakubOnderka/OpenID-Connect-PHP",
+  "version": "v1.4.0",
+  "vendored_path": "src/opnsense/mvc/app/library/OPNsense/Oidc/lib",
+  "note": "Vendored OIDC protocol library. Tracked against upstream by scripts/vendor-update.sh + the vendor-update CI job. Do not hand-edit lib/ files; the checksums below must match upstream byte-for-byte.",
+  "files": {
+    "Jwe.php": "f21dd88dd3cde8fb5ba2834e65af79539e67977eae64f79188253f3aa7cb1b63",
+    "Jwks.php": "ca74d144c8dedbd76c08e6a472524fb6c03a3bcbd20ce3aee7e070384a1378c0",
+    "Jwt.php": "4f85886d0de369f23c4b869ee7976054354c7716cf61fd9954caa5fe6984a45e",
+    "OpenIDConnectClient.php": "bc72dbaec5407dc37768caccde0e0689ce926c1f0f8b666c060e3c506f1f0173"
+  }
+}

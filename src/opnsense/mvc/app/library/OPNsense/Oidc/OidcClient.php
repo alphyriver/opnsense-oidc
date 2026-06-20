@@ -1,19 +1,56 @@
 <?php
 
 /**
- * Simple wrapper for Jumbojett\OpenIDConnectClient to load nessary components and respecting
+ * Wrapper around the vendored JakubOnderka\OpenIDConnectClient.
+ *
+ * It subclasses the protocol client so that:
+ *  - OIDC state/nonce/PKCE values are stored in OPNsense's own Session object
+ *    instead of native $_SESSION (the start/commit/get/set/unsetSessionKey
+ *    overrides below), and
+ *  - HTTP redirects go through OPNsense's Response object (redirect override).
+ *
+ * The library is vendored in lib/ and tracked against upstream by
+ * scripts/vendor-update.sh + the vendor-update CI job; its exact version lives
+ * in /vendor-lock.json. Do not hand-edit the files in lib/.
  */
 
 namespace OPNsense\Oidc;
 
-require(__DIR__ . '/OpenIDConnectClient.php');
-
-use Jumbojett\OpenIDConnectClient;
+use JakubOnderka\OpenIDConnectClient;
 use OPNsense\Auth\OIDC;
 use OPNsense\Mvc\Controller;
 use OPNsense\Mvc\Request;
 use OPNsense\Mvc\Response;
 use OPNsense\Mvc\Session;
+
+/*
+ * phpseclib ships with OPNsense as a system port at /usr/local/share/phpseclib
+ * and is not vendored. Register its autoloaders BEFORE requiring the vendored
+ * OIDC library below: lib/Jwks.php composes a phpseclib trait at
+ * class-definition time, so phpseclib must be resolvable as the files load.
+ */
+(static function (): void {
+    $register = static function (string $namespace, string $dir): void {
+        spl_autoload_register(static function (string $class) use ($namespace, $dir): void {
+            $prefix = trim($namespace, '\\') . '\\';
+            $len = strlen($prefix);
+            if (strncmp($prefix, $class, $len) !== 0) {
+                return;
+            }
+            $file = rtrim($dir, '/') . '/' . str_replace('\\', '/', substr($class, $len)) . '.php';
+            if (is_file($file)) {
+                require_once $file;
+            }
+        });
+    };
+    $register('ParagonIE\\ConstantTime', '/usr/local/share/phpseclib/paragonie');
+    $register('phpseclib3', '/usr/local/share/phpseclib');
+})();
+
+require_once __DIR__ . '/lib/Jwt.php';
+require_once __DIR__ . '/lib/Jwks.php';
+require_once __DIR__ . '/lib/Jwe.php';
+require_once __DIR__ . '/lib/OpenIDConnectClient.php';
 
 class OidcClient extends OpenIDConnectClient
 {
@@ -25,12 +62,11 @@ class OidcClient extends OpenIDConnectClient
     protected $request;
     /** @var Response $response */
     protected $response;
+    /** @var \stdClass|null cached discovery document for getWellKnown* helpers */
+    private $wellKnownCache = null;
 
     public function __construct(OIDC $auth, Controller $controller, string $callback = '/api/oidc/auth/callback')
     {
-        $this->phpseclib_autoload('ParagonIE\ConstantTime', '/usr/local/share/phpseclib/paragonie');
-        $this->phpseclib_autoload('phpseclib3', '/usr/local/share/phpseclib');
-
         parent::__construct(OidcHelpers::stripWellKnown($auth->oidcProviderUrl), $auth->oidcClientId, $auth->oidcClientSecret);
 
         $this->auth = $auth;
@@ -41,13 +77,35 @@ class OidcClient extends OpenIDConnectClient
         $this->setRedirectURL("{$this->request->getScheme()}://{$this->request->getHeader('HOST')}{$callback}");
     }
 
-    public function getWellKnownClaims() {
-        return $this->getWellKnownConfigValue('claims_supported');
+    /**
+     * Fetch and cache the provider's discovery document. Used by the settings
+     * "Test" button (DiscoverController). The library's own discovery accessors
+     * (getWellKnownConfigValue / fetchProviderMetadata) are private, so we read
+     * the document ourselves via the library's public HTTP helper, reusing its
+     * configured TLS settings.
+     */
+    private function discover(): \stdClass
+    {
+        if ($this->wellKnownCache === null) {
+            $url = rtrim($this->getProviderURL(), '/') . '/.well-known/openid-configuration';
+            $this->wellKnownCache = $this->fetchURL($url)->json(true);
+        }
+        return $this->wellKnownCache;
     }
 
-    public function getWellKnownScopes() {
-        return $this->getWellKnownConfigValue('scopes_supported');
+    public function getWellKnownClaims()
+    {
+        return $this->discover()->claims_supported ?? [];
     }
+
+    public function getWellKnownScopes()
+    {
+        return $this->discover()->scopes_supported ?? [];
+    }
+
+    // --- Route the library's session storage through OPNsense's Session -------
+    // OPNsense manages the session lifecycle, so start/commit are no-ops; the
+    // library only ever stores plain strings (state, nonce, PKCE verifier).
 
     protected function startSession() {}
 
@@ -55,15 +113,12 @@ class OidcClient extends OpenIDConnectClient
 
     protected function getSessionKey(string $key)
     {
-        $result = $this->session->get($key, null);
-        if ($result === null)
-            return false;
-        return unserialize($result);
+        return $this->session->get($key, null);
     }
 
-    protected function setSessionKey(string $key, $value)
+    protected function setSessionKey(string $key, string $value)
     {
-        $this->session->set($key, serialize($value));
+        $this->session->set($key, $value);
     }
 
     protected function unsetSessionKey(string $key)
@@ -71,35 +126,8 @@ class OidcClient extends OpenIDConnectClient
         $this->session->remove($key);
     }
 
-    public function redirect(string $url)
+    protected function redirect(string $url)
     {
         $this->response->redirect($url);
-    }
-
-    private function phpseclib_autoload($namespace, $dir)
-    {
-        $split = '\\';
-        $ns = trim($namespace, DIRECTORY_SEPARATOR . $split);
-
-        return spl_autoload_register(
-            function ($class) use ($ns, $dir, $split) {
-                $prefix = $ns . $split;
-                $base_dir = $dir . DIRECTORY_SEPARATOR;
-                $len = strlen($prefix);
-                if (strncmp($prefix, $class, $len)) {
-                    return;
-                }
-
-                $relative_class = substr($class, $len);
-
-                $file = $base_dir .
-                    str_replace($split, DIRECTORY_SEPARATOR, $relative_class) .
-                    '.php';
-
-                if (file_exists($file)) {
-                    require_once $file;
-                }
-            }
-        );
     }
 }
