@@ -1,5 +1,5 @@
 {
-    "name": "homelab-cosmos/opnsense-oidc",
+    "name": "alphyriver/opnsense-oidc",
     "description": "Development tooling for the OPNsense OIDC plugin. This file is NOT shipped in the built package (only Makefile, pkg-descr and src/ are packaged).",
     "license": "BSD-2-Clause",
     "type": "project",

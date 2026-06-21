@@ -1,5 +1,6 @@
 work/
 .vscode
+*.code-profile
 
 # Composer dev tooling (composer.lock is committed for reproducible CI)
 /vendor/

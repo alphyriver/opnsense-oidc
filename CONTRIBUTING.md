@@ -1,13 +1,14 @@
 # Contributing
 
-This is the homelab-cosmos fork of the OPNsense OIDC plugin. It is hosted on
-Forgejo (`forgejo.eridanus-talos.com/homelab-cosmos/opnsense-oidc`) and mirrored
-to GitHub (`github.com/Lachee/opnsense-oidc`).
+This is a hardened fork of the OPNsense OIDC plugin, hosted on GitHub
+(`github.com/alphyriver/opnsense-oidc`) — the source of truth for code, CI, and
+releases. A read-only pull mirror is kept on a private Forgejo instance; it does
+not accept changes.
 
 ## Branching
 
-`main` is the integration branch and the mirror source. Do all work on a feature
-branch and open a PR into `main`:
+`main` is the integration branch. Do all work on a feature branch and open a PR
+into `main`:
 
 ```sh
 git checkout main && git pull
@@ -16,7 +17,7 @@ git checkout -b feat/short-description
 git push -u origin feat/short-description
 ```
 
-Never push directly to `main`; pushing `main` triggers the GitHub mirror.
+Never push directly to `main`.
 
 ## What ships in the package
 
@@ -42,12 +43,13 @@ upstream so their checksums in `/vendor-lock.json` verify. To update:
 sh scripts/vendor-update.sh   # bumps to the latest upstream release if newer
 ```
 
-CI runs this weekly (`.forgejo/workflows/vendor-update.yml`) and opens a PR when
-upstream moves; a human reviews and merges. The job needs a token with repo + PR
-write — set the `VENDOR_UPDATE_TOKEN` secret if the automatic job token can't
-create PRs. If a new upstream release adds or renames files, the
-`require_once` list in `OidcClient.php` may need a manual follow-up (PR CI lint
-will flag it).
+CI runs this weekly (`.github/workflows/vendor-update.yml`) and opens a PR when
+upstream moves; a human reviews and merges. To have the build/test workflow run
+automatically on that PR, set a `VENDOR_UPDATE_TOKEN` secret (a fine-grained PAT
+with contents + pull-requests write) — a PR opened with the default `GITHUB_TOKEN`
+does not trigger other workflows. If a new upstream release adds or renames
+files, the `require_once` list in `OidcClient.php` may need a manual follow-up
+(PR CI lint will flag it).
 
 ## Running the tests
 
@@ -72,39 +74,18 @@ cover them in `tests/`. The CI `test` job runs on every PR.
 
 ## CI
 
-CI is split by platform capability:
+GitHub is the canonical CI platform. Workflows under `.github/workflows/`:
 
-- `.forgejo/workflows/build.yml` (Forgejo) — **PHP lint + unit tests** only.
-- `.github/workflows/build.yml` (GitHub mirror) — lint + unit tests **and** the
-  authoritative **FreeBSD `make package` build + artifact**.
+- `build.yml` — **PHP lint + unit tests** (Linux) **and** the authoritative
+  **FreeBSD `make package` build + artifact**. The build boots a FreeBSD 14.3 VM
+  via `vmactions/freebsd-vm` (which needs `sudo` + `qemu` + `/dev/kvm`), provided
+  by GitHub's hosted `ubuntu-latest` runners.
+- `vendor-update.yml` — the weekly vendored-library tracker (see above).
+- `release.yml` — on a `v*` tag: clean package build, RSA-signed pkg feed, and
+  GitHub Release + Pages publish.
 
-Every job is guarded on `github.server_url` so the pipeline runs **exactly once
-per platform** (Forgejo also reads `.github/workflows`, hence the guard).
+The read-only Forgejo mirror does **not** run CI.
 
-Why the split: the package build boots a FreeBSD 14.3 VM via
-`vmactions/freebsd-vm`, which needs `sudo` + `qemu` + `/dev/kvm` in a privileged
-container. GitHub's hosted `ubuntu-latest` runners provide this; the stock
-Forgejo `act_runner` (jobs in an unprivileged `node:*` container) does not, so
-the build is done on the mirror side.
-
-Also note: Forgejo resolves `uses:` from `code.forgejo.org` by default (only
-`actions/*` is mirrored there), so GitHub-hosted actions are referenced by full
-`https://github.com/...` URL in the `.forgejo` file; the `.github` file uses the
-short `owner/repo@ref` form GitHub requires.
-
-### Enabling FreeBSD builds on Forgejo (optional, later)
-
-To build the package on Forgejo too, register a **dedicated KVM-capable runner**:
-
-1. Host with (nested) virtualization — `/dev/kvm` present.
-2. `act_runner` config running the build job privileged with KVM, e.g. in
-   `config.yaml`:
-   ```yaml
-   container:
-     privileged: true
-     options: --device /dev/kvm
-   ```
-   and a runner image that has `sudo` + `qemu` (or install them in a `prepare`
-   step), labelled distinctly (e.g. `freebsd-builder`).
-3. Re-add a `build` job to `.forgejo/workflows/build.yml` mirroring the
-   `.github` build job, with `runs-on: freebsd-builder`.
+`.gitea/workflows/build-pkg.yml` is retained from the upstream fork: a simple
+`make package` build for anyone running this on a Gitea/self-hosted FreeBSD
+runner (`runs-on: freebsd`). It is not used by this repo's canonical pipeline.
