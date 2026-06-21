@@ -75,3 +75,53 @@ jobs:
           name: os-${{ env.PLUGIN_NAME }}
           path: ${{ env.PLUGIN_CATEGORY }}/${{ env.PLUGIN_NAME }}/work/pkg/*.pkg
           if-no-files-found: error
+
+  # Real OIDC handshake against a live Keycloak: discovery, PAR, auth-code+PKCE,
+  # token exchange, JWKS signature verification, ID-token + claim/group
+  # extraction — the parts that regress on a vendored-library bump and that the
+  # pure-logic unit tests cannot reach. Drives the SAME vendored client the
+  # plugin ships (tests/integration/OidcHandshakeTest.php).
+  integration:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: curl, mbstring
+          tools: composer
+
+      - name: Install dev dependencies
+        run: composer install --no-interaction --no-progress
+
+      - name: Start Keycloak (import test realm)
+        run: |
+          docker run -d --name keycloak -p 8080:8080 \
+            -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
+            -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+            -v "$PWD/tests/integration/keycloak-realm.json:/opt/keycloak/data/import/realm.json:ro" \
+            quay.io/keycloak/keycloak:26.0 start-dev --import-realm
+
+      - name: Wait for Keycloak
+        run: |
+          for i in $(seq 1 60); do
+            if [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/realms/test/.well-known/openid-configuration)" = "200" ]; then
+              echo "Keycloak ready after $((i*3))s"; exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::Keycloak did not become ready"; docker logs keycloak; exit 1
+
+      - name: Run integration test
+        env:
+          OIDC_PROVIDER_URL: http://localhost:8080/realms/test
+          OIDC_CLIENT_ID: oidc-test
+          OIDC_CLIENT_SECRET: test-secret
+          OIDC_USERNAME: testuser
+          OIDC_PASSWORD: testpass
+          OIDC_REDIRECT_URI: http://localhost/callback
+        run: composer test:integration
