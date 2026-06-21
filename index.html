@@ -1,8 +1,123 @@
-<!doctype html><meta charset=utf-8><title>os-oidc pkg feed</title>
-<h1>os-oidc OPNsense plugin feed</h1>
-<p>Signed pkg repository for the <code>os-oidc</code> OPNsense plugin.</p>
-<pre>
-fetch https://alphyriver.github.io/opnsense-oidc/oidc.conf      -&gt; /usr/local/etc/pkg/repos/oidc.conf
-fetch https://alphyriver.github.io/opnsense-oidc/pkg-repo.pub   -&gt; /usr/local/etc/pkg/keys/oidc.pub
-pkg update &amp;&amp; pkg install os-oidc
-</pre>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>os-oidc · signed pkg feed</title>
+<meta name="description" content="Signed FreeBSD pkg repository for the os-oidc OPNsense OpenID Connect login plugin.">
+<style>
+  :root{
+    --accent:#d4520a; --bg:#f5f6f8; --card:#ffffff; --line:#e3e6eb;
+    --ink:#1b2330; --muted:#5b6675;
+    --code-bg:#0d1320; --code-ink:#e7edf6; --code-cmd:#79b0ff; --code-cmt:#6b7a93;
+    --ok:#1a8f4c; --radius:12px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --accent:#ff7a33; --bg:#0e1219; --card:#161d27; --line:#26313f;
+      --ink:#e8edf5; --muted:#94a1b4; --ok:#43d07f;
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink); background:var(--bg); -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:740px; margin:0 auto; padding:56px 22px 64px}
+  header{display:flex; align-items:center; gap:13px; margin-bottom:6px}
+  header svg{width:38px; height:38px; flex:0 0 auto; color:var(--accent)}
+  header b{font-size:22px; letter-spacing:.2px}
+  .pill{display:inline-flex; align-items:center; gap:7px; font-size:12.5px; font-weight:600;
+    color:var(--accent); border:1px solid var(--accent); border-radius:999px; padding:3px 11px}
+  .pill .dot{width:7px; height:7px; border-radius:50%; background:var(--ok)}
+  .sub{color:var(--muted); margin:4px 0 24px; font-size:15.5px; max-width:58ch}
+  .badges{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:28px}
+  .badge{font-size:12.5px; color:var(--muted); border:1px solid var(--line);
+    border-radius:8px; padding:4px 10px; background:var(--card)}
+  .badge b{color:var(--ink); font-weight:600}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius);
+    padding:20px; margin:14px 0}
+  .card h2{margin:0 0 10px; font-size:15px; display:flex; align-items:center; gap:10px}
+  .num{width:22px; height:22px; border-radius:6px; background:var(--accent); color:#fff;
+    display:grid; place-items:center; font-size:12.5px; font-weight:700; flex:0 0 auto}
+  .card p{color:var(--muted); font-size:14px; margin:0 0 12px}
+  pre{margin:0; background:var(--code-bg); border-radius:9px; padding:14px 16px; overflow-x:auto}
+  pre code{font:13px/1.75 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    color:var(--code-ink); white-space:pre}
+  .cmt{color:var(--code-cmt)} .cmd{color:var(--code-cmd)}
+  .card code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.9em}
+  .trust{display:flex; gap:13px; align-items:flex-start; background:var(--card);
+    border:1px solid var(--line); border-left:3px solid var(--ok); border-radius:var(--radius);
+    padding:16px 18px; margin:18px 0 0}
+  .trust svg{width:20px; height:20px; color:var(--ok); flex:0 0 auto; margin-top:2px}
+  .trust .t{font-weight:600; margin-bottom:4px; font-size:14.5px}
+  .trust .fp{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--muted); word-break:break-all}
+  .links{display:flex; flex-wrap:wrap; gap:18px; margin-top:30px; font-size:14px}
+  .links a{color:var(--accent); text-decoration:none}
+  .links a:hover{text-decoration:underline}
+  footer{margin-top:28px; padding-top:16px; border-top:1px solid var(--line);
+    color:var(--muted); font-size:12.5px}
+  footer a{color:var(--accent); text-decoration:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+    </svg>
+    <b>os-oidc</b>
+    <span class="pill"><span class="dot"></span>signed feed</span>
+  </header>
+
+  <p class="sub">Signed FreeBSD pkg repository for the OpenID Connect login plugin
+     for OPNsense. Pin the key once — every install and upgrade is verified.</p>
+
+  <div class="badges">
+    <span class="badge">latest <b>1.0.0</b></span>
+    <span class="badge">ABI <b>FreeBSD:14:amd64</b></span>
+    <span class="badge">pkg signature <b>pubkey (RSA)</b></span>
+  </div>
+
+  <div class="card">
+    <h2><span class="num">1</span>Trust the feed</h2>
+    <p>Pin the repository config and its signing key on the firewall (run as root).</p>
+    <pre><code><span class="cmt"># repo config + signing public key</span>
+<span class="cmd">fetch</span> -o /usr/local/etc/pkg/repos/oidc.conf https://alphyriver.github.io/opnsense-oidc/oidc.conf
+<span class="cmd">fetch</span> -o /usr/local/etc/pkg/keys/oidc.pub  https://alphyriver.github.io/opnsense-oidc/pkg-repo.pub</code></pre>
+  </div>
+
+  <div class="card">
+    <h2><span class="num">2</span>Install</h2>
+    <p>Refresh the catalogue and install. Later upgrades are just <code>pkg upgrade</code>.</p>
+    <pre><code><span class="cmd">pkg</span> update   <span class="cmt"># verifies the catalogue signature against oidc.pub</span>
+<span class="cmd">pkg</span> install os-oidc</code></pre>
+  </div>
+
+  <div class="trust">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>
+    </svg>
+    <div>
+      <div class="t">RSA-signed catalogue</div>
+      <div class="fp">Public key SHA-256<br>5b429cf9a3408159b2067b8c2131b6b57bae0cf4f070f38a562af99c349325e7</div>
+    </div>
+  </div>
+
+  <div class="links">
+    <a href="https://github.com/alphyriver/opnsense-oidc">Source &amp; docs</a>
+    <a href="https://github.com/alphyriver/opnsense-oidc/releases/latest">Releases</a>
+    <a href="https://alphyriver.github.io/opnsense-oidc/oidc.conf">oidc.conf</a>
+    <a href="https://alphyriver.github.io/opnsense-oidc/pkg-repo.pub">pkg-repo.pub</a>
+  </div>
+
+  <footer>Built &amp; signed by CI on every <code>v*</code> tag ·
+    <a href="https://github.com/alphyriver/opnsense-oidc">alphyriver/opnsense-oidc</a></footer>
+
+</div>
+</body>
+</html>
