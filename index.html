@@ -1,0 +1,8 @@
+<!doctype html><meta charset=utf-8><title>os-oidc pkg feed</title>
+<h1>os-oidc OPNsense plugin feed</h1>
+<p>Signed pkg repository for the <code>os-oidc</code> OPNsense plugin.</p>
+<pre>
+fetch https://alphyriver.github.io/opnsense-oidc/oidc.conf      -&gt; /usr/local/etc/pkg/repos/oidc.conf
+fetch https://alphyriver.github.io/opnsense-oidc/pkg-repo.pub   -&gt; /usr/local/etc/pkg/keys/oidc.pub
+pkg update &amp;&amp; pkg install os-oidc
+</pre>
