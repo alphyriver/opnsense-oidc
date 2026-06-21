@@ -92,25 +92,29 @@ jobs:
             # so older versions stay installable for upgrades.
             pkg repo "$WS/site/${ABI}" "rsa:$WS/signing.key"
 
-      - name: Render feed metadata (conf + public key)
+      - name: Render feed metadata (conf, key, landing page)
         run: |
           rm -f signing.key
           OWNER=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
           REPO="${GITHUB_REPOSITORY#*/}"
           PAGES_URL="https://${OWNER}.github.io/${REPO}"
+          REPO_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          VERSION="${GITHUB_REF_NAME#v}"
           SRC="build/${PLUGIN_CATEGORY}/${PLUGIN_NAME}/deploy/repo"
+
+          # Repo conf + published copy of the signing public key.
           sed "s#@PAGES_URL@#${PAGES_URL}#g" "${SRC}/oidc.conf.in" > site/oidc.conf
           cp "${SRC}/oidc.pub" site/pkg-repo.pub
-          cat > site/index.html <<HTML
-          <!doctype html><meta charset=utf-8><title>os-oidc pkg feed</title>
-          <h1>os-oidc OPNsense plugin feed</h1>
-          <p>Signed pkg repository for the <code>os-oidc</code> OPNsense plugin.</p>
-          <pre>
-          fetch ${PAGES_URL}/oidc.conf      -&gt; /usr/local/etc/pkg/repos/oidc.conf
-          fetch ${PAGES_URL}/pkg-repo.pub   -&gt; /usr/local/etc/pkg/keys/oidc.pub
-          pkg update &amp;&amp; pkg install os-oidc
-          </pre>
-          HTML
+          KEY_SHA256=$(sha256sum site/pkg-repo.pub | cut -d' ' -f1)
+
+          # Stylish landing page (template lives in deploy/repo/index.html.in).
+          sed -e "s#@PAGES_URL@#${PAGES_URL}#g" \
+              -e "s#@REPO_URL@#${REPO_URL}#g" \
+              -e "s#@REPO_SLUG@#${GITHUB_REPOSITORY}#g" \
+              -e "s#@VERSION@#${VERSION}#g" \
+              -e "s#@ABI@#${ABI}#g" \
+              -e "s#@KEY_SHA256@#${KEY_SHA256}#g" \
+              "${SRC}/index.html.in" > site/index.html
           echo "feed contents:"; ls -R site | head -40
 
       - name: Publish feed to GitHub Pages
