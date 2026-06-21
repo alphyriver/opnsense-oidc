@@ -156,6 +156,13 @@ interactive login. (Installing a `php*-pecl-APCu` package would enable the
 library's built-in JWKS cache, but that is an operator choice and not required.)
 Provider icons are cached server-side for 24h (see the Icon URL field).
 
+## Security
+
+What the plugin hardens (PKCE-always-on, full ID-token validation, `sub`+`iss`
+account binding, SSRF-hardened icon proxy) and one documented limitation
+(session-fixation — a core-level gap, with the intended fix and residual-risk
+assessment): [docs/security.md](docs/security.md).
+
 # Development
 ## VScode
 To get VSCode to behave correctly with the OPNSense PHP, we will need to tell the language server where to find the classes we use.

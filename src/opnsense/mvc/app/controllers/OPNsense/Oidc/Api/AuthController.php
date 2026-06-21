@@ -342,8 +342,8 @@ class AuthController extends ApiControllerBase
         // rotation fragile (cookie/id mismatch within one request). OPNsense
         // core's own local-password login does not regenerate the session ID
         // either, so this is a core-level gap that affects every auth backend,
-        // not something this plugin should work around in isolation. Tracked for
-        // an upstream fix to OPNsense\Mvc\Session rather than a fragile local hack.
+        // not something this plugin should work around in isolation. Full
+        // rationale, the intended fix, and residual-risk assessment: docs/security.md.
 
         // Create the main login session and log the user in.
         $username = (string)$localUser->name;
