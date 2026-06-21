@@ -1,0 +1,125 @@
+name: 🚀 Release
+
+# Cuts a release when a v* tag is pushed: builds the signed OPNsense package,
+# (re)generates the GitHub Pages pkg feed, and publishes a GitHub Release with
+# the .pkg attached.
+#
+# GitHub is the source of truth for releases (Forgejo is a pull mirror), so this
+# lives only under .github and is guarded on github.server_url for safety.
+#
+# Required repository setup (one-time):
+#   - Secret  PKG_SIGNING_KEY : the RSA private key (PEM) whose public half is
+#                               committed at deploy/repo/oidc.pub.
+#   - Pages   Settings → Pages → Source: "Deploy from a branch" → gh-pages / root.
+
+on:
+  push:
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write   # create the Release and push the gh-pages feed branch
+
+concurrency:
+  group: release-feed
+  cancel-in-progress: false
+
+env:
+  PLUGIN_NAME: oidc
+  PLUGIN_CATEGORY: devel
+  ABI: "FreeBSD:14:amd64"
+
+jobs:
+  release:
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout opnsense/plugins (build root)
+        run: git clone --depth 1 https://github.com/opnsense/plugins.git build
+
+      - name: Checkout plugin source
+        uses: actions/checkout@v4
+        with:
+          path: build/${{ env.PLUGIN_CATEGORY }}/${{ env.PLUGIN_NAME }}
+
+      - name: Checkout existing feed (gh-pages)
+        uses: actions/checkout@v4
+        continue-on-error: true   # absent on the very first release
+        with:
+          ref: gh-pages
+          path: site
+
+      - name: Verify tag matches plugin version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          MK=$(awk -F'=' '/^PLUGIN_VERSION/{gsub(/[ \t]/,"",$2);print $2}' \
+               "build/${PLUGIN_CATEGORY}/${PLUGIN_NAME}/Makefile")
+          echo "tag=$TAG makefile=$MK"
+          test "$TAG" = "$MK" || { echo "::error::tag v$TAG != Makefile PLUGIN_VERSION $MK"; exit 1; }
+
+      - name: Stage signing key
+        env:
+          SIGNING_KEY: ${{ secrets.PKG_SIGNING_KEY }}
+        run: |
+          if [ -z "$SIGNING_KEY" ]; then echo "::error::PKG_SIGNING_KEY secret is not set"; exit 1; fi
+          umask 077
+          printf '%s\n' "$SIGNING_KEY" > signing.key
+
+      - name: Build package and sign the feed (FreeBSD)
+        uses: vmactions/freebsd-vm@v1
+        with:
+          envs: 'PLUGIN_NAME PLUGIN_CATEGORY ABI'
+          usesh: true
+          release: "14.3"
+          prepare: |
+            pkg install -y git gmake
+          run: |
+            set -e
+            WS=$(pwd)
+            mkdir -p "$WS/dist" "$WS/site/${ABI}"
+            cd "build/${PLUGIN_CATEGORY}/${PLUGIN_NAME}"
+            # PLUGIN_DEVEL= produces the clean "os-oidc" package (tier 3) rather
+            # than the development "os-oidc-devel" build.
+            make PLUGIN_DEVEL= package
+            PKG=$(ls work/pkg/os-${PLUGIN_NAME}-*.pkg | head -1)
+            cp "$PKG" "$WS/dist/"
+            cp "$PKG" "$WS/site/${ABI}/"
+            # Regenerate (and RSA-sign) the catalogue over every .pkg in the feed
+            # so older versions stay installable for upgrades.
+            pkg repo "$WS/site/${ABI}" "rsa:$WS/signing.key"
+
+      - name: Render feed metadata (conf + public key)
+        run: |
+          rm -f signing.key
+          OWNER=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          REPO="${GITHUB_REPOSITORY#*/}"
+          PAGES_URL="https://${OWNER}.github.io/${REPO}"
+          SRC="build/${PLUGIN_CATEGORY}/${PLUGIN_NAME}/deploy/repo"
+          sed "s#@PAGES_URL@#${PAGES_URL}#g" "${SRC}/oidc.conf.in" > site/oidc.conf
+          cp "${SRC}/oidc.pub" site/pkg-repo.pub
+          cat > site/index.html <<HTML
+          <!doctype html><meta charset=utf-8><title>os-oidc pkg feed</title>
+          <h1>os-oidc OPNsense plugin feed</h1>
+          <p>Signed pkg repository for the <code>os-oidc</code> OPNsense plugin.</p>
+          <pre>
+          fetch ${PAGES_URL}/oidc.conf      -&gt; /usr/local/etc/pkg/repos/oidc.conf
+          fetch ${PAGES_URL}/pkg-repo.pub   -&gt; /usr/local/etc/pkg/keys/oidc.pub
+          pkg update &amp;&amp; pkg install os-oidc
+          </pre>
+          HTML
+          echo "feed contents:"; ls -R site | head -40
+
+      - name: Publish feed to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
+          publish_branch: gh-pages
+          keep_files: false
+          commit_message: "release: ${{ github.ref_name }} feed update"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.pkg
+          generate_release_notes: true
+          fail_on_unmatched_files: true

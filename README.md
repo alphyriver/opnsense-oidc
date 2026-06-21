@@ -4,10 +4,34 @@ This package will allow you and your administrators to login to the OPNsense das
 ![img of settings](https://i.lu.je/2025/Discord_gfAMDTPfun.png)
 
 # Installation
-Download the package from releases and install on your opnsense via the console:
+
+## Option A — signed pkg feed (recommended, supports upgrades)
+Point OPNsense at the signed package feed once, then install/upgrade like any
+other plugin. Replace `<OWNER>`/`<REPO>` with the GitHub Pages location (the feed
+also serves ready-made copies of both files at its root):
+```sh
+fetch -o /usr/local/etc/pkg/keys/oidc.pub  https://<OWNER>.github.io/<REPO>/pkg-repo.pub
+fetch -o /usr/local/etc/pkg/repos/oidc.conf https://<OWNER>.github.io/<REPO>/oidc.conf
+pkg update
+pkg install os-oidc
 ```
-pkg add os-oidc-1.0.pkg
+The repository is RSA-signed; `oidc.pub` is the public half (pinned via
+`signature_type: pubkey`). Later upgrades are just `pkg upgrade os-oidc`.
+
+> [!NOTE]
+> CLI `pkg install`/`upgrade` is the durable path. The Firmware → Plugins GUI is
+> managed by OPNsense's own repository set and may not list third-party repos
+> reliably; deploy the repo conf via configuration management so it persists
+> across firmware updates.
+
+## Option B — one-off package
+Download the `.pkg` from the GitHub release and install directly:
+```sh
+pkg add os-oidc-0.3.pkg
 ```
+
+Maintainer/release details (signing key, Pages setup, cutting a tag): see
+[deploy/repo/README.md](deploy/repo/README.md).
 
 ## Configuration
 ### Provider Url
