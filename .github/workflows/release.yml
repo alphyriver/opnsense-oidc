@@ -51,10 +51,15 @@ jobs:
       - name: Verify tag matches plugin version
         run: |
           TAG="${GITHUB_REF_NAME#v}"
-          MK=$(awk -F'=' '/^PLUGIN_VERSION/{gsub(/[ \t]/,"",$2);print $2}' \
+          # A prerelease tag (e.g. 1.0.0-rc.1) is validated against its base
+          # version: the Makefile / package version stays 1.0.0; the -rc.N only
+          # marks a release-candidate build (see "Release candidates" in the docs).
+          BASE="${TAG%%-*}"
+          # Strip the release-please marker comment, then whitespace.
+          MK=$(awk -F'=' '/^PLUGIN_VERSION/{v=$2; sub(/#.*/,"",v); gsub(/[ \t]/,"",v); print v}' \
                "build/${PLUGIN_CATEGORY}/${PLUGIN_NAME}/Makefile")
-          echo "tag=$TAG makefile=$MK"
-          test "$TAG" = "$MK" || { echo "::error::tag v$TAG != Makefile PLUGIN_VERSION $MK"; exit 1; }
+          echo "tag=$TAG base=$BASE makefile=$MK"
+          test "$BASE" = "$MK" || { echo "::error::tag v$TAG (base $BASE) != Makefile PLUGIN_VERSION $MK"; exit 1; }
 
       - name: Stage signing key
         env:
@@ -113,7 +118,12 @@ jobs:
           HTML
           echo "feed contents:"; ls -R site | head -40
 
+      # Production feed gets STABLE releases only. A prerelease tag (e.g.
+      # v1.0.0-rc.1) still builds + signs the package and ships it as a GitHub
+      # pre-release for firewall validation, but does not touch the live feed —
+      # so the feed never carries two packages at the same base version.
       - name: Publish feed to GitHub Pages
+        if: ${{ !contains(github.ref_name, '-') }}
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -128,3 +138,4 @@ jobs:
           files: dist/*.pkg
           generate_release_notes: true
           fail_on_unmatched_files: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

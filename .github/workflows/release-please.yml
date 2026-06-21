@@ -1,0 +1,29 @@
+name: 🔖 Release Please
+
+# Maintains a release PR from Conventional Commits: it computes the next semver,
+# updates CHANGELOG.md, version.txt, and the Makefile PLUGIN_VERSION (via the
+# `x-release-please-version` marker). Merging that PR creates the git tag, which
+# triggers release.yml (build → sign → publish feed + GitHub Release).
+#
+# Token: the tag/release must be created by a PAT (RELEASE_PLEASE_TOKEN) for the
+# downstream release.yml (on: push tags) to fire — a tag pushed with the default
+# GITHUB_TOKEN does not trigger other workflows. Without the PAT, push the tag
+# manually after merging the release PR, or re-run release.yml.
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
