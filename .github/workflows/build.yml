@@ -62,6 +62,11 @@ jobs:
           usesh: true
           release: "14.3"
           prepare: |
+            # The stock FreeBSD-kmods repo 404s for this ABI's quarterly branch,
+            # which makes pkg's catalogue update (and thus install) fail. We only
+            # need git/gmake from the main FreeBSD repo, so disable kmods.
+            mkdir -p /usr/local/etc/pkg/repos
+            echo 'FreeBSD-kmods: { enabled: no }' > /usr/local/etc/pkg/repos/FreeBSD-kmods.conf
             pkg install -y git gmake
           run: |
             cd $PLUGIN_CATEGORY/$PLUGIN_NAME
