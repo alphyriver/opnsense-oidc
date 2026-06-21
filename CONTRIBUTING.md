@@ -71,6 +71,10 @@ docker run --rm -v "$PWD":/app -w /app php:8.3-cli vendor/bin/phpunit
 Add new pure helpers to `OidcHelpers` (keep it free of `OPNsense\*` imports) and
 cover them in `tests/`. The CI `test` job runs on every PR.
 
+There is also an **integration** suite that drives a real OIDC handshake against
+a live IdP (Keycloak in CI; any IdP locally). See
+[docs/testing-idps.md](docs/testing-idps.md).
+
 ## CI
 
 GitHub is the canonical CI platform. Workflows under `.github/workflows/`:
