@@ -2,8 +2,7 @@
 
 This is a hardened fork of the OPNsense OIDC plugin, hosted on GitHub
 (`github.com/alphyriver/opnsense-oidc`) — the source of truth for code, CI, and
-releases. A read-only pull mirror is kept on a private Forgejo instance; it does
-not accept changes.
+releases.
 
 ## Branching
 

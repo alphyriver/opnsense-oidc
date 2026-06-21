@@ -1,0 +1,54 @@
+{
+  "realm": "test",
+  "enabled": true,
+  "sslRequired": "none",
+  "groups": [
+    { "name": "admins" }
+  ],
+  "users": [
+    {
+      "username": "testuser",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "testuser@example.com",
+      "firstName": "Test",
+      "lastName": "User",
+      "credentials": [
+        { "type": "password", "value": "testpass", "temporary": false }
+      ],
+      "groups": [ "/admins" ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "oidc-test",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "test-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": [ "http://localhost/callback" ],
+      "webOrigins": [ "+" ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost/*"
+      },
+      "defaultClientScopes": [ "web-origins", "profile", "roles", "email", "acr" ],
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "claim.name": "groups"
+          }
+        }
+      ]
+    }
+  ]
+}
