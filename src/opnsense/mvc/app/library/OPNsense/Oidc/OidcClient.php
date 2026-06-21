@@ -101,6 +101,18 @@ class OidcClient extends OpenIDConnectClient
         return $this->wellKnownCache;
     }
 
+    /**
+     * The provider's RP-initiated-logout endpoint, or null if it doesn't
+     * advertise one. Read from the cached discovery document so the caller can
+     * decide whether single logout is possible without the base client throwing
+     * (getWellKnownConfigValue() throws on a missing key). See AuthController::logoutAction().
+     */
+    public function endSessionEndpoint(): ?string
+    {
+        $url = $this->discover()->end_session_endpoint ?? null;
+        return is_string($url) && $url !== '' ? $url : null;
+    }
+
     public function getWellKnownClaims()
     {
         return $this->discover()->claims_supported ?? [];
