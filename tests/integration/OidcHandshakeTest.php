@@ -2,11 +2,11 @@
 
 /**
  * Integration test: drives a real OpenID Connect authorization-code + PKCE
- * handshake against a live Keycloak (booted by CI / docker), through the SAME
- * vendored client the plugin ships.
+ * handshake against a live IdP, through the SAME vendored client the plugin
+ * ships.
  *
  * It exercises the parts that actually regress when the vendored library is
- * bumped — provider discovery, the PKCE code_challenge, the token exchange,
+ * bumped — provider discovery, PAR, the PKCE challenge, the token exchange,
  * JWKS-based ID-token signature verification, and claim/group extraction — none
  * of which the pure-helper unit tests can cover.
  *
@@ -17,13 +17,24 @@
  * codes OPNsense's /usr/local/share/phpseclib path); phpseclib here comes from
  * Composer (vendor/), autoloaded by the phpunit bootstrap.
  *
- * Env (set by the workflow / local docker run):
- *   OIDC_PROVIDER_URL  e.g. http://keycloak:8080/realms/test
- *   OIDC_CLIENT_ID     oidc-test
- *   OIDC_CLIENT_SECRET test-secret
- *   OIDC_USERNAME      testuser
- *   OIDC_PASSWORD      testpass
- *   OIDC_REDIRECT_URI  http://localhost/callback
+ * Login is pluggable via OIDC_LOGIN_FLAVOR so the same test runs against any IdP:
+ *   keycloak (default, used in CI) — scripts the Keycloak login form headlessly.
+ *   manual                        — for any other IdP (e.g. a live Authentik):
+ *                                    open the printed URL, log in, and paste the
+ *                                    redirected callback URL back (via STDIN or
+ *                                    OIDC_CALLBACK_URL). See docs/testing-idps.md.
+ *
+ * Env:
+ *   OIDC_PROVIDER_URL   required, e.g. http://keycloak:8080/realms/test
+ *   OIDC_CLIENT_ID      required
+ *   OIDC_CLIENT_SECRET  required
+ *   OIDC_REDIRECT_URI   optional (default http://localhost/callback)
+ *   OIDC_LOGIN_FLAVOR   optional (default keycloak)
+ *   OIDC_USERNAME       required for the keycloak flavor
+ *   OIDC_PASSWORD       required for the keycloak flavor
+ *   OIDC_CALLBACK_URL   optional for the manual flavor (else read from STDIN)
+ *   OIDC_EXPECT_USERNAME / OIDC_EXPECT_EMAIL / OIDC_EXPECT_GROUP
+ *                       optional exact-match assertions (defaulted for keycloak)
  */
 
 declare(strict_types=1);
@@ -81,23 +92,21 @@ class OidcHandshakeTest extends TestCase
     private string $issuer;
     private string $clientId;
     private string $clientSecret;
-    private string $username;
-    private string $password;
     private string $redirectUri;
+    private string $flavor;
 
     protected function setUp(): void
     {
-        foreach (['OIDC_PROVIDER_URL', 'OIDC_CLIENT_ID', 'OIDC_CLIENT_SECRET', 'OIDC_USERNAME', 'OIDC_PASSWORD'] as $req) {
-            if (getenv($req) === false || getenv($req) === '') {
+        foreach (['OIDC_PROVIDER_URL', 'OIDC_CLIENT_ID', 'OIDC_CLIENT_SECRET'] as $req) {
+            if ((string)getenv($req) === '') {
                 $this->markTestSkipped("$req not set — integration test needs a live IdP");
             }
         }
         $this->issuer       = rtrim((string)getenv('OIDC_PROVIDER_URL'), '/');
         $this->clientId     = (string)getenv('OIDC_CLIENT_ID');
         $this->clientSecret = (string)getenv('OIDC_CLIENT_SECRET');
-        $this->username     = (string)getenv('OIDC_USERNAME');
-        $this->password     = (string)getenv('OIDC_PASSWORD');
         $this->redirectUri  = (string)(getenv('OIDC_REDIRECT_URI') ?: 'http://localhost/callback');
+        $this->flavor       = (string)(getenv('OIDC_LOGIN_FLAVOR') ?: 'keycloak');
     }
 
     public function testAuthorizationCodePkceFlowYieldsVerifiedClaims(): void
@@ -114,16 +123,16 @@ class OidcHandshakeTest extends TestCase
         $this->assertNotNull($authUrl, 'authorization redirect was not produced');
 
         // PKCE: a code verifier must have been generated and stashed in the
-        // session. (Keycloak advertises a PAR endpoint, so the client pushes the
-        // S256 challenge there rather than on the front-channel URL — hence we
-        // assert the stored verifier, not the URL.) The realm enforces
-        // pkce.code.challenge.method=S256, so the token exchange in step 3 only
-        // succeeds if a valid S256 challenge was sent — proving S256 end-to-end.
+        // session. (IdPs that advertise a PAR endpoint — e.g. Keycloak — push the
+        // S256 challenge there rather than on the front-channel URL, so we assert
+        // the stored verifier, not the URL.) The token exchange in step 3 only
+        // succeeds if a valid challenge was sent, proving PKCE end-to-end.
         $this->assertArrayHasKey('openid_connect_code_verifier', $client->store, 'PKCE code verifier was not generated/stored');
         $this->assertNotEmpty($client->store['openid_connect_code_verifier']);
 
-        // Step 2 — complete the login at Keycloak and capture the callback code.
-        [$code, $state] = $this->loginAndCaptureCode($authUrl);
+        // Step 2 — complete the login at the IdP and capture the callback URL.
+        $callbackUrl = $this->obtainCallbackUrl($authUrl);
+        [$code, $state] = $this->extractCodeState($callbackUrl);
         $this->assertNotEmpty($code, 'no authorization code returned from IdP');
 
         // Step 3 — feed the callback back through the client (token exchange +
@@ -134,15 +143,37 @@ class OidcHandshakeTest extends TestCase
             $this->assertTrue($client->authenticate(), 'authenticate() should succeed on the callback leg');
 
             $claims = $client->getVerifiedClaims();
+
+            // Structural assertions hold for every conformant IdP.
             $this->assertSame($this->issuer, rtrim((string)$claims->iss, '/'), 'issuer mismatch');
             $this->assertSame($this->clientId, $this->audAsString($claims->aud), 'audience mismatch');
             $this->assertNotEmpty($claims->sub, 'sub (subject) must be present for account binding');
-            $this->assertSame('testuser', $claims->preferred_username ?? null);
-            $this->assertSame('testuser@example.com', $claims->email ?? null);
-            $this->assertContains('admins', (array)($claims->groups ?? []), 'group claim should carry "admins"');
+
+            // Exact-value assertions: defaulted for the keycloak fixture, optional
+            // (env-driven) for any other IdP so the same test works against a live
+            // Authentik/PocketID/Entra without hard-coding that tenant's data.
+            if (($u = $this->expect('OIDC_EXPECT_USERNAME', 'testuser')) !== null) {
+                $this->assertSame($u, $claims->preferred_username ?? null, 'preferred_username mismatch');
+            }
+            if (($e = $this->expect('OIDC_EXPECT_EMAIL', 'testuser@example.com')) !== null) {
+                $this->assertSame($e, $claims->email ?? null, 'email mismatch');
+            }
+            if (($g = $this->expect('OIDC_EXPECT_GROUP', 'admins')) !== null) {
+                $this->assertContains($g, (array)($claims->groups ?? []), "group claim should carry \"$g\"");
+            }
         } finally {
             unset($_REQUEST['code'], $_REQUEST['state'], $_GET['code'], $_GET['state']);
         }
+    }
+
+    /** Default expectation only applies to the keycloak fixture; otherwise env-driven or skipped. */
+    private function expect(string $env, string $keycloakDefault): ?string
+    {
+        $val = getenv($env);
+        if ($val !== false && $val !== '') {
+            return $val;
+        }
+        return $this->flavor === 'keycloak' ? $keycloakDefault : null;
     }
 
     /** Keycloak may emit `aud` as a string or an array; normalise for assertion. */
@@ -151,15 +182,53 @@ class OidcHandshakeTest extends TestCase
         return is_array($aud) ? (string)reset($aud) : (string)$aud;
     }
 
-    /**
-     * Script the Keycloak browser login: fetch the login page (cookie jar),
-     * submit credentials to the form's action, and read the authorization code
-     * from the redirect back to the client.
-     *
-     * @return array{0:string,1:string} [code, state]
-     */
-    private function loginAndCaptureCode(string $authUrl): array
+    private function obtainCallbackUrl(string $authUrl): string
     {
+        return match ($this->flavor) {
+            'keycloak' => $this->keycloakLogin($authUrl),
+            'manual'   => $this->manualLogin($authUrl),
+            default    => throw new \RuntimeException("unknown OIDC_LOGIN_FLAVOR: {$this->flavor}"),
+        };
+    }
+
+    /** @return array{0:string,1:string} [code, state] parsed from a callback URL. */
+    private function extractCodeState(string $callbackUrl): array
+    {
+        parse_str((string)parse_url($callbackUrl, PHP_URL_QUERY), $q);
+        return [(string)($q['code'] ?? ''), (string)($q['state'] ?? '')];
+    }
+
+    /**
+     * Manual flavor: works against any IdP. Print the authorization URL, let the
+     * operator log in via a browser, and read the redirected callback URL back
+     * (from OIDC_CALLBACK_URL, or interactively from STDIN). Skips cleanly in CI
+     * (no env, no TTY) so it never blocks the pipeline.
+     */
+    private function manualLogin(string $authUrl): string
+    {
+        $env = getenv('OIDC_CALLBACK_URL');
+        if ($env !== false && $env !== '') {
+            return $env;
+        }
+        if (!stream_isatty(STDIN)) {
+            $this->markTestSkipped('manual flavor needs OIDC_CALLBACK_URL or an interactive TTY');
+        }
+        fwrite(STDERR, "\n\nOpen this URL, log in, then paste the full redirected URL here:\n\n  $authUrl\n\n> ");
+        return trim((string)fgets(STDIN));
+    }
+
+    /**
+     * Keycloak flavor: script the browser login headlessly — fetch the login
+     * page (cookie jar), submit credentials to the form's action, and return the
+     * redirect URL carrying the authorization code.
+     */
+    private function keycloakLogin(string $authUrl): string
+    {
+        foreach (['OIDC_USERNAME', 'OIDC_PASSWORD'] as $req) {
+            if ((string)getenv($req) === '') {
+                $this->markTestSkipped("$req required for the keycloak login flavor");
+            }
+        }
         $jar = tempnam(sys_get_temp_dir(), 'kcjar');
 
         $loginPage = $this->httpGet($authUrl, $jar);
@@ -169,15 +238,14 @@ class OidcHandshakeTest extends TestCase
         $action = html_entity_decode($m[1], ENT_QUOTES | ENT_HTML5);
 
         $location = $this->httpPostCaptureLocation($action, $jar, [
-            'username'     => $this->username,
-            'password'     => $this->password,
+            'username'     => (string)getenv('OIDC_USERNAME'),
+            'password'     => (string)getenv('OIDC_PASSWORD'),
             'credentialId' => '',
         ]);
         @unlink($jar);
 
         $this->assertNotEmpty($location, 'Keycloak did not redirect after login (bad credentials or flow change)');
-        parse_str((string)parse_url($location, PHP_URL_QUERY), $q);
-        return [(string)($q['code'] ?? ''), (string)($q['state'] ?? '')];
+        return $location;
     }
 
     private function httpGet(string $url, string $jar): string

@@ -113,7 +113,25 @@ client (opnsense):
 | Username claim | `preferred_username` |
 
 ### Authentik
-WIP
+provider (Authentik → *Applications → Providers → OAuth2/OpenID*):
+| Property | Value |
+|----------|-------|
+| Client type | Confidential |
+| Redirect URI | `https://<opnsense>/api/oidc/auth/callback` (Strict) |
+| Signing Key | any RSA certificate |
+| Scopes | `openid`, `email`, `profile`, `groups` |
+
+client (opnsense):
+| Setting | Value |
+|---------|-------|
+| Provider URL | `https://auth.example.com/application/o/<app-slug>/` |
+| Username claim | `preferred_username` |
+| Group claim | `groups` |
+
+To emit the `groups` claim, add a **Scope Mapping** (scope name `groups`) with
+expression `return [g.name for g in request.user.ak_groups.all()]` and include it
+in the provider's scopes. Full walkthrough + a one-command smoke test against
+your live Authentik: [docs/testing-idps.md](docs/testing-idps.md).
 
 # Development
 ## VScode
