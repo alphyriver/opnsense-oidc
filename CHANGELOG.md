@@ -4,6 +4,13 @@ All notable changes are recorded here. From the next release onward this file is
 maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [1.0.0](https://github.com/alphyriver/opnsense-oidc/compare/os-oidc-v0.3.1...os-oidc-v1.0.0) (2026-06-21)
+
+
+### Miscellaneous Chores
+
+* release 1.0.0 ([4c91bdb](https://github.com/alphyriver/opnsense-oidc/commit/4c91bdb33570d73b1508f0cb12b38beaeed35cd5))
+
 ## [0.3.1](https://github.com/alphyriver/opnsense-oidc/compare/os-oidc-v0.3.0...os-oidc-v0.3.1) (2026-06-21)
 
 
