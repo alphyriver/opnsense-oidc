@@ -49,10 +49,14 @@ You do not bump the version by hand.
 > (`git commit --allow-empty -m "chore: release 1.0.0" -m "Release-As: 1.0.0"`);
 > release-please will target the release PR at 1.0.0.
 
-> **Token:** for the release-please tag to auto-trigger `release.yml`, set a
-> `RELEASE_PLEASE_TOKEN` PAT (contents + PR write). Without it, push the tag
-> manually after merging the release PR (a `GITHUB_TOKEN`-created tag does not
-> trigger other workflows).
+> **Triggering the signed build.** A release tag created by release-please with
+> the default `GITHUB_TOKEN` does **not** auto-trigger `release.yml` (GitHub
+> loop-prevention). After merging the release PR, run it by hand against the tag:
+> ```sh
+> gh workflow run release.yml --ref v1.0.0
+> ```
+> (For fully hands-off tag→build instead, set a `RELEASE_PLEASE_TOKEN` PAT with
+> contents + PR write and the tag will trigger `release.yml` directly.)
 
 On a `vX.Y.Z` tag, `release.yml` verifies the tag matches `PLUGIN_VERSION`, then:
 

@@ -5,10 +5,15 @@ name: 🔖 Release Please
 # `x-release-please-version` marker). Merging that PR creates the git tag, which
 # triggers release.yml (build → sign → publish feed + GitHub Release).
 #
-# Token: the tag/release must be created by a PAT (RELEASE_PLEASE_TOKEN) for the
-# downstream release.yml (on: push tags) to fire — a tag pushed with the default
-# GITHUB_TOKEN does not trigger other workflows. Without the PAT, push the tag
-# manually after merging the release PR, or re-run release.yml.
+# PR creation: works with the default GITHUB_TOKEN as long as
+# Settings → Actions → General → "Allow GitHub Actions to create and approve pull
+# requests" is enabled. A RELEASE_PLEASE_TOKEN PAT (contents + PR write) is
+# optional and only needed for fully hands-off tag→build.
+#
+# Triggering the signed build: a release tag created here with GITHUB_TOKEN does
+# NOT auto-trigger release.yml (GitHub loop-prevention). Either supply the PAT, or
+# after merging the release PR run release.yml by hand:
+#   gh workflow run release.yml --ref vX.Y.Z   (release.yml has workflow_dispatch)
 
 on:
   push:
