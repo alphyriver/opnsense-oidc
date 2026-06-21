@@ -133,6 +133,29 @@ expression `return [g.name for g in request.user.ak_groups.all()]` and include i
 in the provider's scopes. Full walkthrough + a one-command smoke test against
 your live Authentik: [docs/testing-idps.md](docs/testing-idps.md).
 
+## Single logout (optional)
+
+`/api/oidc/auth/logout` performs RP-initiated (single) logout: it clears the
+local OPNsense session and, when the provider advertises an `end_session_endpoint`
+in its discovery document, redirects there with `id_token_hint` so the provider
+ends its session too. Providers without that endpoint get a plain local logout.
+
+OPNsense's built-in **Log Out** button is part of core and cannot be hooked by a
+plugin, so this does **not** replace it — link to `/api/oidc/auth/logout`
+explicitly where you want single logout. To have the IdP send the user back to
+OPNsense afterwards, pre-register a `post_logout_redirect_uri` with the provider
+(otherwise it shows its own logged-out page).
+
+## Caching & performance
+
+On each login the plugin fetches the provider's discovery document and signing
+keys (**JWKS**) from the IdP. The bundled OIDC library can cache JWKS via
+**APCu**, but OPNsense's PHP does not ship the `apcu` extension, so on OPNsense
+these are fetched per login — one or two extra HTTPS GETs, negligible for an
+interactive login. (Installing a `php*-pecl-APCu` package would enable the
+library's built-in JWKS cache, but that is an operator choice and not required.)
+Provider icons are cached server-side for 24h (see the Icon URL field).
+
 # Development
 ## VScode
 To get VSCode to behave correctly with the OPNSense PHP, we will need to tell the language server where to find the classes we use.

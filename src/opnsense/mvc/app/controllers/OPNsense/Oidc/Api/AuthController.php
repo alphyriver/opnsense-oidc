@@ -352,9 +352,62 @@ class AuthController extends ApiControllerBase
         $this->session->set('last_access', time());
         $this->session->set('protocol', strval($cnf->system->webgui->protocol));
         $this->session->set('oidc_user', $user);
+        // Retain the raw ID token + provider so an opt-in single logout can send
+        // id_token_hint to the provider's end_session_endpoint (see logoutAction).
+        $tokenResponse = $this->oidcClient->getTokenResponse();
+        $this->session->set('oidc_id_token', (string)($tokenResponse->id_token ?? ''));
+        $this->session->set('oidc_logout_provider', strval($provider));
         $this->session->close();
         $this->response->redirect('/');
         return 'Redirecting home...';
+    }
+
+    /**
+     * RP-initiated (single) logout. Tears down the local OPNsense session and,
+     * when the provider advertises an end_session_endpoint, redirects there with
+     * id_token_hint so the IdP ends its session too. Opt-in by nature: providers
+     * without that endpoint simply get a local logout.
+     *
+     * Note: OPNsense's core "Log Out" button is not plugin-hookable, so this is a
+     * separate endpoint an operator can link to (e.g. /api/oidc/auth/logout); it
+     * does not replace the GUI logout. See README ("Single logout").
+     */
+    public function logoutAction()
+    {
+        $idToken  = (string)$this->session->get('oidc_id_token');
+        $provider = (string)$this->session->get('oidc_logout_provider');
+
+        // Always clear the local session first, so a later IdP failure can't leave
+        // the user authenticated on the firewall.
+        foreach (
+            ['Username', 'last_access', 'protocol', 'oidc_user', 'oidc_id_token',
+             'oidc_logout_provider', self::SESSION_AUTH_PROVIDER] as $key
+        ) {
+            $this->session->remove($key);
+        }
+
+        if ($provider !== '' && $idToken !== '') {
+            try {
+                $auth = $this->getAuthProvider($provider);
+                if ($auth !== null) {
+                    $client = new OidcClient($auth, $this);
+                    if ($client->endSessionEndpoint() !== null) {
+                        $this->session->close();
+                        // Redirect to the provider's logout (id_token_hint set by
+                        // the client). No post_logout_redirect_uri by default — it
+                        // must be pre-registered with the IdP to avoid a rejection.
+                        $client->signOut($idToken);
+                        return 'Redirecting to provider logout...';
+                    }
+                }
+            } catch (\Exception $e) {
+                // Fall through to a plain local logout.
+            }
+        }
+
+        $this->session->close();
+        $this->response->redirect('/');
+        return 'Logged out.';
     }
 
     protected function getAuthProvider($provider): OIDC|null
