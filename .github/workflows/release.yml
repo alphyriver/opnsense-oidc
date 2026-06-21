@@ -138,10 +138,23 @@ jobs:
           keep_files: false
           commit_message: "release: ${{ github.ref_name }} feed update"
 
+      # Use the release-please-maintained CHANGELOG as the single source of
+      # release notes (its top section). Avoids GitHub's auto-generated notes,
+      # which compare against the previous tag — uninformative for a stable cut
+      # that immediately follows its own release candidate.
+      - name: Extract release notes from CHANGELOG
+        run: |
+          CL="build/${PLUGIN_CATEGORY}/${PLUGIN_NAME}/CHANGELOG.md"
+          if [ -f "$CL" ]; then
+            awk '/^## /{n++} n==1{print} n==2{exit}' "$CL" > release-notes.md
+          fi
+          [ -s release-notes.md ] || printf 'See CHANGELOG.md for details.\n' > release-notes.md
+          echo "---- release notes ----"; cat release-notes.md
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*.pkg
-          generate_release_notes: true
+          body_path: release-notes.md
           fail_on_unmatched_files: true
           prerelease: ${{ contains(github.ref_name, '-') }}
