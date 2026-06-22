@@ -1,0 +1,17 @@
+# Keep third-party GitHub Actions current. Dependabot rewrites each pinned
+# commit SHA (and its trailing `# vX.Y.Z` comment) on a bump, so SHA-pinning
+# stays self-maintaining rather than freezing on stale, unpatched action code.
+#
+# Note: Dependabot's github-actions ecosystem scans .github/workflows only.
+# The .gitea/workflows actions must be bumped manually (or via Renovate).
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+    groups:
+      github-actions:
+        patterns: ["*"]

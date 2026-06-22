@@ -1,0 +1,53 @@
+name: 🔒 Lint workflows
+
+# Supply-chain guardrail for CI itself. zizmor fails the build on the high-
+# severity workflow-security smells this audit cares about — unpinned actions
+# and dangerous triggers (pull_request_target misuse / template injection) — so
+# the SHA-pinning can't silently regress. actionlint validates workflow syntax.
+# Lower-severity defense-in-depth findings (persist-credentials, minimal
+# permissions) are reported but not gated; those are tracked separately.
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - '.gitea/workflows/**'
+      - '.github/dependabot.yml'
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/**'
+      - '.gitea/workflows/**'
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: actionlint
+        env:
+          # SC2012 ("use find instead of ls") is info-level style; `ls` for
+          # human-readable CI logging is intentional. Everything else stays on.
+          SHELLCHECK_OPTS: --exclude=SC2012
+        run: |
+          bash <(curl -sSf https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
+          ./actionlint -color
+
+      - name: zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pipx install zizmor==1.26.1
+          # Scan whichever workflow dirs exist in this repo (.gitea may be absent).
+          dirs=()
+          for d in .github/workflows .gitea/workflows; do
+            [ -d "$d" ] && dirs+=("$d")
+          done
+          zizmor --min-severity high "${dirs[@]}"
