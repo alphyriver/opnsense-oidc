@@ -43,12 +43,12 @@ jobs:
         run: git clone --depth 1 https://github.com/opnsense/plugins.git build
 
       - name: Checkout plugin source
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
         with:
           path: build/${{ env.PLUGIN_CATEGORY }}/${{ env.PLUGIN_NAME }}
 
       - name: Checkout existing feed (gh-pages)
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
         continue-on-error: true   # absent on the very first release
         with:
           ref: gh-pages
@@ -76,7 +76,7 @@ jobs:
           printf '%s\n' "$SIGNING_KEY" > signing.key
 
       - name: Build package and sign the feed (FreeBSD)
-        uses: vmactions/freebsd-vm@v1
+        uses: vmactions/freebsd-vm@b84ab5559b5a1bb4b8ee2737d2506a16e1737636  # v1.4.8
         with:
           envs: 'PLUGIN_NAME PLUGIN_CATEGORY ABI'
           usesh: true
@@ -134,7 +134,7 @@ jobs:
       # so the feed never carries two packages at the same base version.
       - name: Publish feed to GitHub Pages
         if: ${{ !contains(github.ref_name, '-') }}
-        uses: peaceiris/actions-gh-pages@v4
+        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453  # v4.1.0
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./site
@@ -156,7 +156,7 @@ jobs:
           echo "---- release notes ----"; cat release-notes.md
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
         with:
           files: dist/*.pkg
           body_path: release-notes.md

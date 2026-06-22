@@ -18,7 +18,7 @@ jobs:
           git clone --depth 1 https://github.com/opnsense/plugins.git ${GITHUB_WORKSPACE}
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
         with:
           path: ${{ env.PLUGIN_CATEGORY }}/${{ env.PLUGIN_NAME }}
 
@@ -28,7 +28,7 @@ jobs:
           make package
 
       - name: Upload artifact
-        uses: christopherhx/gitea-upload-artifact@v4
+        uses: christopherhx/gitea-upload-artifact@81f940d004763f986ba3582c007fd842dd5cb0d7  # v4
         with:
           name: os-${{ env.PLUGIN_NAME }}
           path: ${{ env.PLUGIN_CATEGORY }}/${{ env.PLUGIN_NAME }}/work/pkg/*.pkg
