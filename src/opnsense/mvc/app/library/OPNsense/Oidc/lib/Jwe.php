@@ -14,6 +14,15 @@ use function JakubOnderka\base64url_encode;
 
 class Jwe
 {
+    /**
+     * Allowed JWE key-management ("alg") algorithms, kept as a single auditable
+     * allowlist mirroring Jwt::SUPPORTED_ALGOS. RSA1_5 (RSAES-PKCS1-v1_5) is
+     * deliberately excluded: it is vulnerable to the Bleichenbacher / padding-
+     * oracle class of attacks and is forbidden by current JOSE guidance. Only
+     * the RSA-OAEP variants are accepted.
+     */
+    const SUPPORTED_KEY_MANAGEMENT_ALGS = ['RSA-OAEP', 'RSA-OAEP-256'];
+
     /** @var string */
     private $token;
 
@@ -55,6 +64,10 @@ class Jwe
 
         if (!isset($header->alg)) {
             throw new \RuntimeException("Required JWE header `alg` missing");
+        }
+
+        if (!in_array($header->alg, self::SUPPORTED_KEY_MANAGEMENT_ALGS, true)) {
+            throw new \RuntimeException("Unsupported or forbidden JWE key-management algo $header->alg");
         }
 
         $key = $this->decryptKey($header->alg, $key, $encryptedKey);
@@ -125,11 +138,9 @@ class Jwe
                     ->withHash('sha256')
                     ->withMGFHash('sha256')
                     ->decrypt($encryptedKey);
-            case 'RSA1_5':
-                return $rsa
-                    ->withPadding(RSA::ENCRYPTION_PKCS1)
-                    ->decrypt($encryptedKey);
             default:
+                // RSA1_5 (PKCS#1 v1.5) is intentionally unsupported; see
+                // self::SUPPORTED_KEY_MANAGEMENT_ALGS.
                 throw new \RuntimeException("Unsupported algo $alg");
         }
     }
@@ -217,11 +228,9 @@ class Jwe
                     ->withHash('sha256')
                     ->withMGFHash('sha256')
                     ->encrypt($key);
-            case 'RSA1_5':
-                return $rsa
-                    ->withPadding(RSA::ENCRYPTION_PKCS1)
-                    ->encrypt($key);
             default:
+                // RSA1_5 (PKCS#1 v1.5) is intentionally unsupported; see
+                // self::SUPPORTED_KEY_MANAGEMENT_ALGS.
                 throw new \RuntimeException("Unsupported algo $alg");
         }
     }

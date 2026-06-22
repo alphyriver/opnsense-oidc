@@ -269,11 +269,21 @@ class AuthController extends ApiControllerBase
 
         // Username/email fallback facts (with email-local-part fallback, e.g.
         // Microsoft Entra ID v2.0 UserInfo omits preferred_username).
+        //
+        // Trust gate: only a *verified* email may participate in fallback
+        // matching (or in deriving a username from its local part). An IdP that
+        // returns `email_verified: false` is asserting it has NOT confirmed the
+        // user owns that address, so it must not be able to resolve to — let
+        // alone bind — a local account by email. When unverified we pass a null
+        // email into both deriveUsername() and findLocalUser(); the
+        // username-claim path is unaffected.
         $claimValue     = $user->{$auth->oidcUsernameClaim} ?? null;
-        $lookupEmail    = $user->email ?? null;
+        $rawEmail       = $user->email ?? null;
+        $emailVerified  = filter_var($user->email_verified ?? false, FILTER_VALIDATE_BOOLEAN);
+        $lookupEmail    = ($emailVerified && is_string($rawEmail)) ? $rawEmail : null;
         $lookupUsername = OidcHelpers::deriveUsername(
             is_string($claimValue) ? $claimValue : null,
-            is_string($lookupEmail) ? $lookupEmail : null
+            $lookupEmail
         );
         $fallbackUser   = $this->findLocalUser($lookupUsername, $lookupEmail);
         $fallbackBoundElsewhere = ($fallbackUser !== false && $verified)
@@ -285,7 +295,8 @@ class AuthController extends ApiControllerBase
             $boundUsername !== null,
             $boundUser !== false,
             $fallbackUser !== false,
-            $fallbackBoundElsewhere
+            $fallbackBoundElsewhere,
+            (bool)$auth->oidcStrictBinding
         );
 
         switch ($action) {
@@ -295,6 +306,11 @@ class AuthController extends ApiControllerBase
             case OidcHelpers::RESOLVE_DENY_CONFLICT:
                 $this->response->setStatusCode(403, "Account conflict");
                 return "This local account is already linked to a different identity.";
+            case OidcHelpers::RESOLVE_DENY_STRICT:
+                $this->response->setStatusCode(403, "Account conflict");
+                return "Strict binding is enabled: a local account matching this " .
+                    "identity already exists but is not linked to it. Link it " .
+                    "explicitly, or disable strict binding, to allow this login.";
             case OidcHelpers::RESOLVE_USE_FALLBACK:
                 $localUser = $fallbackUser;
                 $this->bindIdentity($links, $issuer, $subject, (string)$localUser->name, $provider);

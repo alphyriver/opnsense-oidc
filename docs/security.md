@@ -11,6 +11,20 @@ A note on the plugin's security posture and one documented limitation.
 - **Accounts bind to the verified `sub` + `iss`**, not to a mutable
   username/email, with an account-takeover guard (see
   `OidcHelpers::decideAccountResolution()`).
+- **Strict account binding (on by default)** refuses to silently link a login to
+  a *pre-existing* local account on a username/email collision — only an existing
+  verified `(iss, sub)` link or a freshly created account may log in. This stops
+  an IdP-side username/email from being pointed at a local administrator. It is a
+  per-provider toggle (`oidc_strict_binding`); disable only if you intentionally
+  rely on first-login adoption of existing local accounts.
+- **Unverified email is never used for matching** — `email`/its local part is
+  only eligible for fallback username and account lookup when the IdP asserts
+  `email_verified: true`; otherwise it is dropped (the username-claim path is
+  unaffected).
+- **JWE key-management algorithms are allowlisted** — only `RSA-OAEP` /
+  `RSA-OAEP-256` are accepted; `RSA1_5` (RSAES-PKCS1-v1_5, the Bleichenbacher /
+  padding-oracle class) is rejected on both decrypt and encrypt
+  (`Jwe::SUPPORTED_KEY_MANAGEMENT_ALGS`).
 - **Redirect URI** prefers an admin-configured value and does not trust the
   inbound `Host` header when set.
 - **The icon proxy is SSRF/DoS-hardened** — http(s)-only, redirect cap, response
