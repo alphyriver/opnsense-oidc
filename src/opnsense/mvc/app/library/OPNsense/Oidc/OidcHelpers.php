@@ -89,6 +89,13 @@ class OidcHelpers
     public const RESOLVE_USE_FALLBACK = 'use_fallback';
     /** No match: create the account (and link it when verified). */
     public const RESOLVE_CREATE = 'create';
+    /**
+     * Refuse: strict binding is enabled and this identity is not already linked
+     * to the matched pre-existing local account. Silently adopting an existing
+     * (possibly privileged) local account via a username/email collision is
+     * exactly what strict binding exists to prevent.
+     */
+    public const RESOLVE_DENY_STRICT = 'deny_strict';
 
     /**
      * Decide how to resolve an OIDC login to a local account. Pure so the
@@ -107,6 +114,9 @@ class OidcHelpers
      * @param bool $boundUserExists       the bound link's local account still exists
      * @param bool $fallbackUserExists    username/email matched an existing local account
      * @param bool $fallbackBoundElsewhere that matched account is bound to a different identity
+     * @param bool $strictBinding         refuse silent fallback-linking to a pre-existing
+     *                                    local account (only a verified binding or a freshly
+     *                                    created account may log in); defense-in-depth, on by default
      * @return string one of the RESOLVE_* constants
      */
     public static function decideAccountResolution(
@@ -114,7 +124,8 @@ class OidcHelpers
         bool $haveBoundLink,
         bool $boundUserExists,
         bool $fallbackUserExists,
-        bool $fallbackBoundElsewhere
+        bool $fallbackBoundElsewhere,
+        bool $strictBinding = false
     ): string {
         if ($verified && $haveBoundLink && $boundUserExists) {
             return self::RESOLVE_USE_BOUND;
@@ -122,6 +133,14 @@ class OidcHelpers
         if ($fallbackUserExists) {
             if ($verified && $fallbackBoundElsewhere) {
                 return self::RESOLVE_DENY_CONFLICT;
+            }
+            // With strict binding on, a username/email collision with a
+            // pre-existing local account is never silently adopted: the only
+            // ways in are an existing verified (issuer, subject) link (handled
+            // above) or creating a brand-new account (below). This blocks an
+            // IdP-side username/email from being pointed at a local admin.
+            if ($strictBinding) {
+                return self::RESOLVE_DENY_STRICT;
             }
             return self::RESOLVE_USE_FALLBACK;
         }

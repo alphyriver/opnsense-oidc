@@ -108,8 +108,9 @@ final class OidcHelpersTest extends TestCase
     }
 
     /**
-     * @param array{bool,bool,bool,bool,bool} $facts ordered as the method args:
-     *   verified, haveBoundLink, boundUserExists, fallbackUserExists, fallbackBoundElsewhere
+     * @param array{bool,bool,bool,bool,bool,4?:bool} $facts ordered as the method args:
+     *   verified, haveBoundLink, boundUserExists, fallbackUserExists,
+     *   fallbackBoundElsewhere, [strictBinding]
      */
     #[DataProvider('resolutionCases')]
     public function testDecideAccountResolution(array $facts, string $expected): void
@@ -148,6 +149,28 @@ final class OidcHelpersTest extends TestCase
                 [[false, false, false, true, true], OidcHelpers::RESOLVE_USE_FALLBACK],
             'unverified, no fallback -> create' =>
                 [[false, false, false, false, false], OidcHelpers::RESOLVE_CREATE],
+
+            // --- Strict binding (defense-in-depth, on by default) ---------------
+            // A live verified binding still wins under strict binding.
+            'strict: bound live account wins' =>
+                [[true, true, true, true, true, true], OidcHelpers::RESOLVE_USE_BOUND],
+            // An unbound verified identity colliding with a pre-existing local
+            // account is refused (not silently linked) when strict binding is on.
+            'strict: unbound verified fallback -> deny' =>
+                [[true, false, false, true, false, true], OidcHelpers::RESOLVE_DENY_STRICT],
+            // A stale bound link plus a fallback collision is likewise refused.
+            'strict: stale bound link, fallback -> deny' =>
+                [[true, true, false, true, false, true], OidcHelpers::RESOLVE_DENY_STRICT],
+            // No collision -> still free to create a brand-new account.
+            'strict: no fallback -> create' =>
+                [[true, false, false, false, false, true], OidcHelpers::RESOLVE_CREATE],
+            // Strict binding refuses adoption even for an unverified login.
+            'strict: unverified fallback -> deny' =>
+                [[false, false, false, true, false, true], OidcHelpers::RESOLVE_DENY_STRICT],
+            // The "owned by a different identity" conflict still takes precedence
+            // over the generic strict refusal (more specific error first).
+            'strict: fallback owned elsewhere -> deny conflict' =>
+                [[true, false, false, true, true, true], OidcHelpers::RESOLVE_DENY_CONFLICT],
         ];
     }
 

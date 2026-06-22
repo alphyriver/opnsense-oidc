@@ -40,6 +40,7 @@ class OIDC extends Local implements IAuthConnector
     public $oidcClientId = null;
     public $oidcClientSecret = null;
     public $oidcCreateUsers = false;
+    public $oidcStrictBinding = true;
     public $oidcUsernameClaim = 'preferred_username';
     public $oidcGroupClaim = null;
     public $oidcDefaultGroups = [];
@@ -98,6 +99,13 @@ class OIDC extends Local implements IAuthConnector
             }
         }
 
+        // Strict binding defaults ON and is handled explicitly (not via the
+        // map above), so that a fail-safe default survives both fresh installs
+        // and configs saved before this field existed: a missing key keeps it
+        // on, and only an explicit falsy value ("0"/unchecked) turns it off.
+        $this->oidcStrictBinding = !array_key_exists('oidc_strict_binding', $config)
+            || !empty($config['oidc_strict_binding']);
+
         $this->oidcDefaultGroups = explode(',', $config['oidc_default_groups']);
         $this->oidcScopes = explode(',', $config['oidc_scopes']);
     }
@@ -151,6 +159,21 @@ class OIDC extends Local implements IAuthConnector
                         "successful login with group memberships returned for the user."
                 ),
                 'type' => 'checkbox',
+                'validate' => fn($value) => [],
+            ],
+            'oidc_strict_binding' => [
+                'name' => gettext('Strict account binding'),
+                'help' => gettext(
+                    "Recommended. Only allow a login to use a pre-existing local account when that " .
+                    "account is already linked to this exact federated identity (verified issuer + subject). " .
+                    "A login whose username/email merely collides with an existing local account is refused " .
+                    "instead of being silently linked to it — this prevents an IdP-side username or email " .
+                    "from being pointed at a local administrator. New accounts (when automatic user creation " .
+                    "is enabled) are unaffected. Disable only if you intentionally rely on first-login " .
+                    "adoption of existing local accounts."
+                ),
+                'type' => 'checkbox',
+                'default' => '1',
                 'validate' => fn($value) => [],
             ],
             'oidc_default_groups' => [
