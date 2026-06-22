@@ -3,9 +3,18 @@
   "repository": "https://github.com/JakubOnderka/OpenID-Connect-PHP",
   "version": "v1.4.0",
   "vendored_path": "src/opnsense/mvc/app/library/OPNsense/Oidc/lib",
-  "note": "Vendored OIDC protocol library. Tracked against upstream by scripts/vendor-update.sh + the vendor-update CI job. Do not hand-edit lib/ files; the checksums below must match upstream byte-for-byte.",
-  "files": {
+  "note": "Vendored OIDC protocol library carrying local SECURITY patches. The committed lib/ files = upstream <version> with patches/ applied (in listed order). Do NOT hand-edit lib/ files: add or edit a file under patches/ and run scripts/vendor-update.sh to re-derive lib/ and refresh the checksums. `upstream_files` are the pristine per-file sha256 of the pinned upstream release; `files` are the sha256 of the committed (patched) lib/ files. scripts/vendor-verify.sh (run in CI) re-fetches upstream, re-applies patches, and fails on any drift.",
+  "patches": [
+    "0001-jwe-drop-rsa1_5.patch"
+  ],
+  "upstream_files": {
     "Jwe.php": "f21dd88dd3cde8fb5ba2834e65af79539e67977eae64f79188253f3aa7cb1b63",
+    "Jwks.php": "ca74d144c8dedbd76c08e6a472524fb6c03a3bcbd20ce3aee7e070384a1378c0",
+    "Jwt.php": "4f85886d0de369f23c4b869ee7976054354c7716cf61fd9954caa5fe6984a45e",
+    "OpenIDConnectClient.php": "bc72dbaec5407dc37768caccde0e0689ce926c1f0f8b666c060e3c506f1f0173"
+  },
+  "files": {
+    "Jwe.php": "643dded832e5c1fbec02c8e70ddfdebfe533dda80a3789e276a49af549a6f27b",
     "Jwks.php": "ca74d144c8dedbd76c08e6a472524fb6c03a3bcbd20ce3aee7e070384a1378c0",
     "Jwt.php": "4f85886d0de369f23c4b869ee7976054354c7716cf61fd9954caa5fe6984a45e",
     "OpenIDConnectClient.php": "bc72dbaec5407dc37768caccde0e0689ce926c1f0f8b666c060e3c506f1f0173"

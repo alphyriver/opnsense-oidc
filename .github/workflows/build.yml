@@ -15,6 +15,20 @@ env:
   PLUGIN_CATEGORY: devel
 
 jobs:
+  # Verifies the vendored OIDC library against vendor-lock.json: committed lib/
+  # matches the recorded patched checksums, the pinned upstream matches its
+  # pristine checksums, and upstream + patches/ re-derives the committed files
+  # exactly. Fails if a local security patch (e.g. JWE RSA1_5 removal) drifts or
+  # a lib/ file was hand-edited instead of patched.
+  vendor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+
+      - name: Verify vendored library + patches
+        run: sh scripts/vendor-verify.sh
+
   # Fast PHP unit tests for pure-logic functions. No FreeBSD/OPNsense runtime
   # needed, so this runs directly on Linux and gates PRs cheaply.
   test:
