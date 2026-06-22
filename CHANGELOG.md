@@ -4,6 +4,15 @@ All notable changes are recorded here. From the next release onward this file is
 maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [1.0.1](https://github.com/alphyriver/opnsense-oidc/compare/v1.0.0...v1.0.1) (2026-06-22)
+
+
+### Bug Fixes
+
+* **feed:** clean, command-first landing page ([e648064](https://github.com/alphyriver/opnsense-oidc/commit/e6480644a1b54147f812ad0470e7ca8e9bdaa896))
+* **feed:** OPNsense-native clean landing page ([5e6670a](https://github.com/alphyriver/opnsense-oidc/commit/5e6670a1a7f012c9be34e741c870e6bb5d082dd7))
+* **feed:** restore stylish landing page ([259d56e](https://github.com/alphyriver/opnsense-oidc/commit/259d56ea6c718c1c1ae5a12b7e8ace6966560ed7))
+
 ## [1.0.0](https://github.com/alphyriver/opnsense-oidc/compare/v0.3...v1.0.0) (2026-06-21)
 
 First stable release of the hardened OPNsense OpenID Connect login plugin —
