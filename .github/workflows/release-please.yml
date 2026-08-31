@@ -18,6 +18,13 @@ name: 🔖 Release Please
 on:
   push:
     branches: [ main ]
+  # Manual re-run. release-please refuses to act while a merged release PR is
+  # still labelled `autorelease: pending` ("There are untagged, merged release
+  # PRs outstanding - aborting"), and it only reconsiders on a push to main — so
+  # once that state is repaired there is no way to make it look again short of
+  # an unrelated commit. This repo and opnsense-truenas-api-client both sat
+  # stuck that way from 2026-07-11, quietly cutting no releases at all.
+  workflow_dispatch: {}
 
 permissions:
   contents: write
