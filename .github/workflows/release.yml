@@ -1,11 +1,19 @@
 name: 🚀 Release
 
-# Cuts a release when a v* tag is pushed: builds the signed OPNsense package,
-# (re)generates the GitHub Pages pkg feed, and publishes a GitHub Release with
-# the .pkg attached.
+# Cuts a release when a v* tag is pushed: builds the signed OPNsense package for
+# every supported pkg ABI, (re)generates the GitHub Pages pkg feed, and publishes
+# a GitHub Release with each .pkg attached.
 #
 # GitHub is the source of truth for releases (Forgejo is a pull mirror), so this
 # lives only under .github and is guarded on github.server_url for safety.
+#
+# ABIs: an OPNsense plugin package is stamped with the pkg ABI of the FreeBSD host
+# that built it, and pkg rejects a package whose ABI does not match the firewall.
+# OPNsense 26.1 and below are FreeBSD:14:amd64; 26.7 and up are FreeBSD:15:amd64.
+# The feed therefore publishes one directory per ABI — the client's repo conf
+# expands ${ABI} — so a fleet mid-upgrade resolves the right one on both sides.
+# To support a new ABI, add a row to the build matrix. Nothing else knows the
+# list: the ABI travels with each package as abi.txt.
 #
 # Required repository setup (one-time):
 #   - Secret  PKG_SIGNING_KEY : the RSA private key (PEM) whose public half is
@@ -23,7 +31,7 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: write   # create the Release and push the gh-pages feed branch
+  contents: read
 
 concurrency:
   group: release-feed
@@ -32,12 +40,104 @@ concurrency:
 env:
   PLUGIN_NAME: oidc
   PLUGIN_CATEGORY: devel
-  ABI: "FreeBSD:14:amd64"
 
 jobs:
-  release:
+  # One package per ABI. Each leg builds on the FreeBSD release whose pkg ABI it
+  # targets — that is what stamps the package — and hands the result to `publish`
+  # as an artifact. fail-fast so a release never ships a partial set of ABIs.
+  build:
     if: ${{ github.server_url == 'https://github.com' }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - abi: "FreeBSD:14:amd64"
+            slug: "freebsd14-amd64"
+            freebsd: "14.3"
+          - abi: "FreeBSD:15:amd64"
+            slug: "freebsd15-amd64"
+            freebsd: "15.1"
+    steps:
+      - name: Checkout opnsense/plugins (build root)
+        run: git clone --depth 1 https://github.com/opnsense/plugins.git build
+
+      - name: Checkout plugin source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        with:
+          path: build/${{ env.PLUGIN_CATEGORY }}/${{ env.PLUGIN_NAME }}
+
+      - name: Verify tag matches plugin version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          # A prerelease tag (e.g. 1.0.0-rc.1) is validated against its base
+          # version: the Makefile / package version stays 1.0.0; the -rc.N only
+          # marks a release-candidate build (see "Release candidates" in the docs).
+          BASE="${TAG%%-*}"
+          # Strip the release-please marker comment, then whitespace.
+          MK=$(awk -F'=' '/^PLUGIN_VERSION/{v=$2; sub(/#.*/,"",v); gsub(/[ \t]/,"",v); print v}' \
+               "build/${PLUGIN_CATEGORY}/${PLUGIN_NAME}/Makefile")
+          echo "tag=$TAG base=$BASE makefile=$MK"
+          test "$BASE" = "$MK" || { echo "::error::tag v$TAG (base $BASE) != Makefile PLUGIN_VERSION $MK"; exit 1; }
+
+      - name: Build package (FreeBSD ${{ matrix.freebsd }} → ${{ matrix.abi }})
+        uses: vmactions/freebsd-vm@b84ab5559b5a1bb4b8ee2737d2506a16e1737636  # v1.4.8
+        env:
+          WANT_ABI: ${{ matrix.abi }}
+          SLUG: ${{ matrix.slug }}
+        with:
+          envs: 'PLUGIN_NAME PLUGIN_CATEGORY WANT_ABI SLUG'
+          usesh: true
+          release: ${{ matrix.freebsd }}
+          prepare: |
+            # The stock FreeBSD-kmods repo 404s for this ABI's quarterly branch,
+            # which makes pkg's catalogue update (and thus install) fail. We only
+            # need git/gmake from the main FreeBSD repo, so disable kmods.
+            mkdir -p /usr/local/etc/pkg/repos
+            echo 'FreeBSD-kmods: { enabled: no }' > /usr/local/etc/pkg/repos/FreeBSD-kmods.conf
+            pkg install -y git gmake
+          run: |
+            set -e
+            WS=$(pwd)
+            mkdir -p "$WS/dist"
+            cd "build/${PLUGIN_CATEGORY}/${PLUGIN_NAME}"
+            # PLUGIN_DEVEL= produces the clean "os-oidc" package (tier 3) rather
+            # than the development "os-oidc-devel" build.
+            make PLUGIN_DEVEL= package
+            PKG=$(ls work/pkg/os-${PLUGIN_NAME}-*.pkg | head -1)
+
+            # A package stamped with the wrong ABI installs nowhere and is the
+            # exact failure this matrix exists to prevent, so refuse to ship it.
+            GOT=$(pkg info -F "$PKG" | awk -F': *' '/^Architecture/{print $2}')
+            echo "built $(basename "$PKG") arch=$GOT want=$WANT_ABI"
+            test "$GOT" = "$WANT_ABI" || { echo "::error::package ABI $GOT != expected $WANT_ABI"; exit 1; }
+
+            # The Makefile names every build os-<name>-<version>.pkg regardless of
+            # ABI, so disambiguate before the packages meet in one Release. The ABI
+            # travels alongside so the publisher needs no copy of the matrix.
+            cp "$PKG" "$WS/dist/$(basename "${PKG%.pkg}")-${SLUG}.pkg"
+            printf '%s\n' "$WANT_ABI" > "$WS/dist/abi.txt"
+            ls -l "$WS/dist"
+
+      - name: Upload package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: pkg-${{ matrix.slug }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  # Single publisher: signs one catalogue per ABI directory, renders the feed
+  # metadata once, and cuts one Release carrying every ABI's package. Kept out of
+  # the matrix so the gh-pages push and the Release are not raced by parallel legs.
+  publish:
+    needs: build
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the Release and push the gh-pages feed branch
     steps:
       - name: Checkout opnsense/plugins (build root)
         run: git clone --depth 1 https://github.com/opnsense/plugins.git build
@@ -54,18 +154,27 @@ jobs:
           ref: gh-pages
           path: site
 
-      - name: Verify tag matches plugin version
+      - name: Download packages
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          path: artifacts
+          pattern: pkg-*
+
+      - name: Lay packages into their ABI directories
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          # A prerelease tag (e.g. 1.0.0-rc.1) is validated against its base
-          # version: the Makefile / package version stays 1.0.0; the -rc.N only
-          # marks a release-candidate build (see "Release candidates" in the docs).
-          BASE="${TAG%%-*}"
-          # Strip the release-please marker comment, then whitespace.
-          MK=$(awk -F'=' '/^PLUGIN_VERSION/{v=$2; sub(/#.*/,"",v); gsub(/[ \t]/,"",v); print v}' \
-               "build/${PLUGIN_CATEGORY}/${PLUGIN_NAME}/Makefile")
-          echo "tag=$TAG base=$BASE makefile=$MK"
-          test "$BASE" = "$MK" || { echo "::error::tag v$TAG (base $BASE) != Makefile PLUGIN_VERSION $MK"; exit 1; }
+          set -euo pipefail
+          mkdir -p dist
+          # One artifact per matrix leg, each carrying its package and the ABI it
+          # was stamped with. The feed directory is named by the real ABI (colons
+          # and all) because that is what ${ABI} expands to in the repo conf.
+          for d in artifacts/pkg-*/; do
+            abi=$(cat "$d/abi.txt")
+            [ -n "$abi" ] || { echo "::error::empty abi.txt in $d"; exit 1; }
+            mkdir -p "site/${abi}"
+            cp "$d"/*.pkg "site/${abi}/"
+            cp "$d"/*.pkg dist/
+          done
+          echo "feed layout:"; ls -R site | head -60
 
       - name: Stage signing key
         env:
@@ -75,36 +184,32 @@ jobs:
           umask 077
           printf '%s\n' "$SIGNING_KEY" > signing.key
 
-      - name: Build package and sign the feed (FreeBSD)
+      - name: Sign every ABI catalogue (FreeBSD)
         uses: vmactions/freebsd-vm@b84ab5559b5a1bb4b8ee2737d2506a16e1737636  # v1.4.8
         with:
-          envs: 'PLUGIN_NAME PLUGIN_CATEGORY ABI'
           usesh: true
-          release: "14.3"
+          release: "15.1"
           prepare: |
-            # The stock FreeBSD-kmods repo 404s for this ABI's quarterly branch,
-            # which makes pkg's catalogue update (and thus install) fail. We only
-            # need git/gmake from the main FreeBSD repo, so disable kmods.
             mkdir -p /usr/local/etc/pkg/repos
             echo 'FreeBSD-kmods: { enabled: no }' > /usr/local/etc/pkg/repos/FreeBSD-kmods.conf
-            pkg install -y git gmake
           run: |
             set -e
             WS=$(pwd)
-            mkdir -p "$WS/dist" "$WS/site/${ABI}"
-            cd "build/${PLUGIN_CATEGORY}/${PLUGIN_NAME}"
-            # PLUGIN_DEVEL= produces the clean "os-oidc" package (tier 3) rather
-            # than the development "os-oidc-devel" build.
-            make PLUGIN_DEVEL= package
-            PKG=$(ls work/pkg/os-${PLUGIN_NAME}-*.pkg | head -1)
-            cp "$PKG" "$WS/dist/"
-            cp "$PKG" "$WS/site/${ABI}/"
-            # Regenerate (and RSA-sign) the catalogue over every .pkg in the feed
-            # so older versions stay installable for upgrades.
-            pkg repo "$WS/site/${ABI}" "rsa:$WS/signing.key"
+            # `pkg repo` indexes whatever packages sit in the directory; the ABI is
+            # per-package metadata, so one host signs catalogues for every ABI.
+            # Regenerate over the whole directory so older versions stay installable.
+            found=0
+            for dir in "$WS"/site/FreeBSD:*; do
+              [ -d "$dir" ] || continue
+              echo "==> signing catalogue for $(basename "$dir")"
+              pkg repo "$dir" "rsa:$WS/signing.key"
+              found=$((found + 1))
+            done
+            [ "$found" -gt 0 ] || { echo "no ABI directories to sign"; exit 1; }
 
       - name: Render feed metadata (conf, key, landing page)
         run: |
+          set -euo pipefail
           rm -f signing.key
           OWNER=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
           REPO="${GITHUB_REPOSITORY#*/}"
@@ -112,6 +217,8 @@ jobs:
           REPO_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
           VERSION="${GITHUB_REF_NAME#v}"
           SRC="build/${PLUGIN_CATEGORY}/${PLUGIN_NAME}/deploy/repo"
+          # Every ABI the feed actually carries, for the landing-page badge.
+          ABI_LIST=$(cd site && ls -d FreeBSD:* | paste -sd',' - | sed 's/,/, /g')
 
           # Repo conf + published copy of the signing public key.
           sed "s#@PAGES_URL@#${PAGES_URL}#g" "${SRC}/oidc.conf.in" > site/oidc.conf
@@ -123,7 +230,7 @@ jobs:
               -e "s#@REPO_URL@#${REPO_URL}#g" \
               -e "s#@REPO_SLUG@#${GITHUB_REPOSITORY}#g" \
               -e "s#@VERSION@#${VERSION}#g" \
-              -e "s#@ABI@#${ABI}#g" \
+              -e "s#@ABI@#${ABI_LIST}#g" \
               -e "s#@KEY_SHA256@#${KEY_SHA256}#g" \
               "${SRC}/index.html.in" > site/index.html
           echo "feed contents:"; ls -R site | head -40

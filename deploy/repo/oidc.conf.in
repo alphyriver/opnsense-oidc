@@ -5,8 +5,9 @@
 # renders this template (substituting @PAGES_URL@) and publishes the ready-to-use
 # file at @PAGES_URL@/oidc.conf — fetch that rather than editing this by hand.
 #
-# ${ABI} expands client-side (e.g. FreeBSD:14:amd64), so one conf works across
-# FreeBSD/OPNsense ABIs as long as the feed publishes that ABI's directory.
+# ${ABI} expands client-side (e.g. FreeBSD:14:amd64 on OPNsense 26.1,
+# FreeBSD:15:amd64 on 26.7+), so this one conf works across FreeBSD/OPNsense
+# ABIs — the release workflow publishes a directory for each.
 oidc: {
   url: "@PAGES_URL@/${ABI}",
   priority: 10,
