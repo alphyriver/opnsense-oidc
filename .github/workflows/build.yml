@@ -33,6 +33,13 @@ jobs:
   # needed, so this runs directly on Linux and gates PRs cheaply.
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The PHP the plugin actually runs under: OPNsense 26.1 and below ship
+        # PHP 8.3, 26.7 and up ship PHP 8.5. Lint and test against both for as
+        # long as the fleet spans both releases.
+        php-version: ['8.3', '8.5']
     steps:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
@@ -40,7 +47,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240  # v2.37.2
         with:
-          php-version: '8.3'
+          php-version: ${{ matrix.php-version }}
           tools: composer
 
       - name: Lint PHP sources
@@ -52,11 +59,21 @@ jobs:
       - name: Run unit tests
         run: composer test
 
-  # Builds the actual OPNsense package on FreeBSD (matches OPNsense 25.7 /
-  # FreeBSD 14.3). vmactions/freebsd-vm needs nested virtualization (/dev/kvm).
+  # Builds the actual OPNsense package on FreeBSD, once per pkg ABI the release
+  # feed publishes — FreeBSD 14.3 for OPNsense <=26.1, 15.1 for 26.7+ — so an
+  # ABI-specific build break is caught on the PR rather than at release time.
+  # vmactions/freebsd-vm needs nested virtualization (/dev/kvm).
   build:
     runs-on: ubuntu-latest
     needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - slug: "freebsd14-amd64"
+            freebsd: "14.3"
+          - slug: "freebsd15-amd64"
+            freebsd: "15.1"
     steps:
       - name: Checkout opnsense/plugins (build root)
         run: git clone --depth 1 https://github.com/opnsense/plugins.git "${GITHUB_WORKSPACE}"
@@ -66,12 +83,12 @@ jobs:
         with:
           path: ${{ env.PLUGIN_CATEGORY }}/${{ env.PLUGIN_NAME }}
 
-      - name: Build package in FreeBSD
+      - name: Build package in FreeBSD ${{ matrix.freebsd }}
         uses: vmactions/freebsd-vm@b84ab5559b5a1bb4b8ee2737d2506a16e1737636  # v1.4.8
         with:
           envs: 'PLUGIN_NAME PLUGIN_CATEGORY'
           usesh: true
-          release: "14.3"
+          release: ${{ matrix.freebsd }}
           prepare: |
             # The stock FreeBSD-kmods repo 404s for this ABI's quarterly branch,
             # which makes pkg's catalogue update (and thus install) fail. We only
@@ -86,7 +103,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
-          name: os-${{ env.PLUGIN_NAME }}
+          name: os-${{ env.PLUGIN_NAME }}-${{ matrix.slug }}
           path: ${{ env.PLUGIN_CATEGORY }}/${{ env.PLUGIN_NAME }}/work/pkg/*.pkg
           if-no-files-found: error
 

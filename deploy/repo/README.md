@@ -97,7 +97,12 @@ os-oidc` before installing stable if you want a clean upgrade (the RC shares the
 
 ## Notes
 
-- The feed directory is keyed by pkg ABI (e.g. `FreeBSD:14:amd64`). Bump the
-  `ABI`/`release` values in the workflow when targeting a new FreeBSD base.
+- The feed carries one directory per pkg ABI (`FreeBSD:14:amd64` for OPNsense
+  26.1 and below, `FreeBSD:15:amd64` for 26.7+), and the repo conf's `${ABI}`
+  expands client-side so each firewall resolves its own. A package is stamped
+  with the ABI of the FreeBSD host that built it and pkg rejects a mismatch, so
+  each ABI is a separate leg of the release workflow's build matrix. To support
+  a new ABI, add a row to that matrix — the ABI travels with each package as
+  `abi.txt`, so nothing else needs to learn the list.
 - The repo conf uses `signature_type: pubkey`; a node only trusts packages whose
   catalogue verifies against the pinned `oidc.pub`.
