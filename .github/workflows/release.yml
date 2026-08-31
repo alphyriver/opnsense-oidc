@@ -110,7 +110,10 @@ jobs:
 
             # A package stamped with the wrong ABI installs nowhere and is the
             # exact failure this matrix exists to prevent, so refuse to ship it.
-            GOT=$(pkg info -F "$PKG" | awk -F': *' '/^Architecture/{print $2}')
+            # Split on the FIRST colon only: the ABI value itself contains
+            # colons (FreeBSD:14:amd64), so a ': *' field separator returns just
+            # "FreeBSD" and the check compares the wrong thing.
+            GOT=$(pkg info -F "$PKG" | sed -n 's/^Architecture[[:space:]]*:[[:space:]]*//p')
             echo "built $(basename "$PKG") arch=$GOT want=$WANT_ABI"
             test "$GOT" = "$WANT_ABI" || { echo "::error::package ABI $GOT != expected $WANT_ABI"; exit 1; }
 
