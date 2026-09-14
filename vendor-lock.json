@@ -1,7 +1,7 @@
 {
   "package": "jakub-onderka/openid-connect-php",
   "repository": "https://github.com/JakubOnderka/OpenID-Connect-PHP",
-  "version": "v1.4.0",
+  "version": "v1.5.0",
   "vendored_path": "src/opnsense/mvc/app/library/OPNsense/Oidc/lib",
   "note": "Vendored OIDC protocol library carrying local SECURITY patches. The committed lib/ files = upstream <version> with patches/ applied (in listed order). Do NOT hand-edit lib/ files: add or edit a file under patches/ and run scripts/vendor-update.sh to re-derive lib/ and refresh the checksums. `upstream_files` are the pristine per-file sha256 of the pinned upstream release; `files` are the sha256 of the committed (patched) lib/ files. scripts/vendor-verify.sh (run in CI) re-fetches upstream, re-applies patches, and fails on any drift.",
   "patches": [
