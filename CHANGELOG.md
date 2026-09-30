@@ -4,6 +4,13 @@ All notable changes are recorded here. From the next release onward this file is
 maintained automatically by [release-please](https://github.com/googleapis/release-please)
 from [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [1.0.2](https://github.com/alphyriver/opnsense-oidc/compare/v1.0.1...v1.0.2) (2026-09-30)
+
+
+### Bug Fixes
+
+* **release:** let release-please tag its own merged release PRs ([359e456](https://github.com/alphyriver/opnsense-oidc/commit/359e456c17fb520a5fab0b7fc888e715ead7940f))
+
 ## [1.0.1](https://github.com/alphyriver/opnsense-oidc/compare/v1.0.0...v1.0.1) (2026-06-22)
 
 
