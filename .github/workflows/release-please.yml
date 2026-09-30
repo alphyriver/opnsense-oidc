@@ -7,13 +7,15 @@ name: 🔖 Release Please
 #
 # PR creation: works with the default GITHUB_TOKEN as long as
 # Settings → Actions → General → "Allow GitHub Actions to create and approve pull
-# requests" is enabled. A RELEASE_PLEASE_TOKEN PAT (contents + PR write) is
-# optional and only needed for fully hands-off tag→build.
+# requests" is enabled. The tag→build hand-off is automatic either way: without a
+# RELEASE_PLEASE_TOKEN PAT this job dispatches release.yml itself (below).
 #
-# Triggering the signed build: a release tag created here with GITHUB_TOKEN does
-# NOT auto-trigger release.yml (GitHub loop-prevention). Either supply the PAT, or
-# after merging the release PR run release.yml by hand:
-#   gh workflow run release.yml --ref vX.Y.Z   (release.yml has workflow_dispatch)
+# No `package-name` in release-please-config.json: with separate-pull-requests
+# off, the release PR branch (release-please--branches--main) carries no
+# component, and release-please only tags a merged PR whose branch component
+# matches the configured one. A package-name made them differ, so every merged
+# release PR was skipped ("PR component: undefined does not match configured
+# component: os-oidc") and left `autorelease: pending` to be reconciled by hand.
 
 on:
   push:
@@ -29,13 +31,33 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write   # dispatch release.yml for the tag release-please just cut
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
       - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071  # v4.4.1
+        id: release
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # A tag created with the default GITHUB_TOKEN does not trigger release.yml
+      # (its `push: tags` never fires), but a workflow_dispatch sent with that
+      # token does. With a RELEASE_PLEASE_TOKEN PAT the tag push already starts
+      # it, so only dispatch when falling back to github.token.
+      - name: Build and publish the release
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HAS_PAT: ${{ secrets.RELEASE_PLEASE_TOKEN != '' }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: |
+          if [ "$HAS_PAT" = "true" ]; then
+            echo "RELEASE_PLEASE_TOKEN set; the $TAG push triggers release.yml itself"
+            exit 0
+          fi
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
+          echo "::notice::dispatched release.yml for $TAG"

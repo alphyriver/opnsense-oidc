@@ -45,15 +45,24 @@ jobs:
         run: |
           set -eu
           branch="vendor/oidc-lib-${VER}"
+          # The PR for this version is already open (or its branch was left
+          # behind after merging): don't fail every week on the rejected push.
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            echo "::notice::$branch already exists; this update is already proposed"
+            exit 0
+          fi
+          # fix(deps), not chore: the vendored code ships in the package, so
+          # merging this should make release-please propose a release.
+          title="fix(deps): re-vendor OIDC library ${VER}"
           git config user.name "vendor-bot"
           git config user.email "vendor-bot@users.noreply.github.com"
           git checkout -b "$branch"
           git add -A
-          git commit -m "chore(deps): re-vendor OIDC library ${VER}"
+          git commit -m "$title"
           git push origin "$branch"
           gh pr create \
             --base main --head "$branch" \
-            --title "chore(deps): re-vendor OIDC library ${VER}" \
+            --title "$title" \
             --body "Automated re-vendor of the OIDC client library to ${VER}.
 
           Review the diff and confirm the \`vendor-lock.json\` checksums before merging. CI lint/tests run on this PR when a VENDOR_UPDATE_TOKEN PAT is configured (see workflow header)."

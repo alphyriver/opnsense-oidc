@@ -51,12 +51,12 @@ You do not bump the version by hand.
 
 > **Triggering the signed build.** A release tag created by release-please with
 > the default `GITHUB_TOKEN` does **not** auto-trigger `release.yml` (GitHub
-> loop-prevention). After merging the release PR, run it by hand against the tag:
+> loop-prevention), so `release-please.yml` dispatches `release.yml` against the
+> new tag itself. (With a `RELEASE_PLEASE_TOKEN` PAT, contents + PR write, the
+> tag push triggers `release.yml` directly.) If that ever fails, run it by hand:
 > ```sh
 > gh workflow run release.yml --ref v1.0.0
 > ```
-> (For fully hands-off tag→build instead, set a `RELEASE_PLEASE_TOKEN` PAT with
-> contents + PR write and the tag will trigger `release.yml` directly.)
 
 On a `vX.Y.Z` tag, `release.yml` verifies the tag matches `PLUGIN_VERSION`, then:
 
